@@ -1084,3 +1084,31 @@ dialog footer {
     font-size: 12px
   }
 }
+
+
+/* Distraction-free review: preserve the center viewport and its toolbar. */
+body.photo-only {
+  grid-template-rows: minmax(0, 1fr);
+}
+body.photo-only .appbar,
+body.photo-only .film,
+body.photo-only .statusbar,
+body.photo-only .left-panel,
+body.photo-only .right-panel,
+body.photo-only .photo-heading,
+body.photo-only .toolbar {
+  display: none !important;
+}
+body.photo-only .workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+body.photo-only .center {
+  grid-template-rows: minmax(0, 1fr);
+}
+body.photo-only #viewport {
+  background: #141516;
+}
+#autoTone {
+  width: 100%;
+  margin: 0 0 10px;
+}
