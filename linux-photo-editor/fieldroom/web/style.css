@@ -1112,3 +1112,6 @@ body.photo-only #viewport {
   width: 100%;
   margin: 0 0 10px;
 }
+
+.smart-crop-controls { padding: 8px 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.smart-crop-controls select, .smart-crop-controls button { display: block; width: 100%; margin: 8px 0; padding: 7px; }
