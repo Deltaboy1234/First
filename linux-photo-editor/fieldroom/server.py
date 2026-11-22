@@ -64,6 +64,9 @@ class EditorServer(ThreadingHTTPServer):
         if route == "export":
             with session.lock:
                 return export(photo, data["recipe"])
+        if route == "auto_tone":
+            source = im.decode(photo.path, 960)
+            return {"recipe": im.auto_tone(source)}
         if route == "thumbnail":
             with self.thumb_lock:
                 settings = im.recipe(data.get("recipe"))
