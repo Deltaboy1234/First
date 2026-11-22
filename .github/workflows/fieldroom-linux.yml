@@ -1,0 +1,49 @@
+name: Fieldroom Linux test
+on:
+  push:
+    paths:
+      - "linux-photo-editor/**"
+      - ".github/workflows/fieldroom-linux.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install-and-edit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: linux-photo-editor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the desktop application
+        run: |
+          bash install.sh
+          cd "$RUNNER_TEMP"
+          "$HOME/.local/bin/fieldroom" --help
+          "$HOME/.local/share/fieldroom/venv/bin/python" -c 'from fieldroom.server import WEB; import rawpy; assert (WEB/"index.html").is_file()'
+          test -s "$HOME/.local/share/applications/io.github.deltaboy1234.Fieldroom.desktop"
+      - name: Verify native zoom and export with a Nikon NEF
+        run: |
+          export FIELDROOM_TEST_NEF="$RUNNER_TEMP/iss030e122639.NEF"
+          curl --fail --silent --show-error --location --retry 2 \
+            "https://raw.githubusercontent.com/letmaik/rawpy/2705f5b223c162c3cbc48474fe1a01c3cf09fa4f/test/iss030e122639.NEF" \
+            -o "$FIELDROOM_TEST_NEF"
+          test "$(git hash-object "$FIELDROOM_TEST_NEF")" = "e03d193927a604de40fd0fd7a71e33fde878a0e1"
+          "$HOME/.local/share/fieldroom/venv/bin/python" -m unittest discover -s tests -v
+      - name: Exercise the desktop browser at two pixel densities
+        run: |
+          npm install --prefix "$RUNNER_TEMP/fieldroom-test" --no-save --no-audit --no-fund playwright@1.56.1
+          export NODE_PATH="$RUNNER_TEMP/fieldroom-test/node_modules"
+          export FIELDROOM_PYTHON="$HOME/.local/share/fieldroom/venv/bin/python"
+          if command -v google-chrome >/dev/null; then
+            export FIELDROOM_BROWSER="$(command -v google-chrome)"
+          else
+            "$RUNNER_TEMP/fieldroom-test/node_modules/.bin/playwright" install chromium
+          fi
+          node tests/browser.cjs

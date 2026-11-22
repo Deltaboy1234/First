@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fieldroom · Develop</title>
+  <link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css">
+  <script type="module" src="/editor.js"></script>
+</head>
+<body>
+<svg aria-hidden="true" class="symbols" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="open" viewBox="0 0 24 24"><path d="M3 17V6h7l2 2h8v3M3 19l3-8h16l-3 8Z"/></symbol>
+  <symbol id="save" viewBox="0 0 24 24"><path d="M4 4h13l3 3v13H4zM8 4v6h8V4M8 20v-7h8v7"/></symbol>
+  <symbol id="folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3zM3 9h18"/></symbol>
+  <symbol id="drive" viewBox="0 0 24 24"><path d="M6 5h12l3 10v4H3v-4zM3 15h18M15 17h2"/></symbol>
+  <symbol id="crop" viewBox="0 0 24 24"><path d="M6 2v15a1 1 0 0 0 1 1h15M2 6h15a1 1 0 0 1 1 1v15"/></symbol>
+  <symbol id="before" viewBox="0 0 24 24"><path d="M3 5h18v14H3zM12 5v14"/></symbol>
+  <symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M8 7V4h8v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></symbol>
+  <symbol id="back" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+  <symbol id="next" viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></symbol>
+  <symbol id="up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 5v15"/></symbol>
+  <symbol id="film" viewBox="0 0 24 24"><path d="M2 5h20v14H2zM7 5v14M17 5v14M2 10h5M17 10h5"/></symbol>
+  <symbol id="adjust" viewBox="0 0 24 24"><path d="M3 6h6m4 0h8M3 12h10m4 0h4M3 18h4m4 0h10M10 3v6M15 9v6M8 15v6"/></symbol>
+  <symbol id="folderup" viewBox="0 0 24 24"><path d="m7 9 5-5 5 5M12 4v10a4 4 0 0 0 4 4h4"/></symbol>
+</defs></svg>
+<header class="appbar">
+  <div class="brand"><img src="/icon.svg" alt="">Fieldroom</div>
+  <div class="module"><svg><use href="#adjust"/></svg>Develop</div>
+  <div class="actions"><button id="openFolder" title="Open a photo folder (Ctrl+O)"><svg><use href="#open"/></svg>Open folder</button>
+    <button class="primary" id="saveAll" title="Save full-resolution copies to Edited (Ctrl+S)"><svg><use href="#save"/></svg><span>Save All</span></button></div>
+</header>
+<main class="workspace">
+ <aside class="left-panel" aria-label="Navigator and folders">
+   <section class="navigator"><h2>Navigator</h2>
+    <div id="navSurface" title="Click or drag to position the zoomed view"><div id="navWrap" hidden><img id="navImage" alt=""><div id="navFrame"></div></div></div>
+    <div class="nav-zoom" aria-label="Navigator zoom">
+     <button data-zoom="fit" aria-pressed="true">Fit</button><button data-zoom="fill" aria-pressed="false">Fill</button><button data-zoom="100" aria-pressed="false">1:1</button><output id="zoomReadout">—</output>
+    </div>
+   </section>
+   <section class="folders"><h2>Folders</h2><div id="folderRows"></div></section>
+   <section class="locations"><h2>Locations</h2><div id="placeRows"></div></section>
+   <section class="file-info"><h2>File information</h2><strong id="infoName">—</strong><span id="infoSize"></span><span id="infoCamera"></span><span id="infoCapture"></span></section>
+ </aside>
+ <section class="center" aria-label="Photo editor">
+   <header class="photo-heading"><h1 id="photoName">Fieldroom</h1><span id="position"></span></header>
+   <div id="viewport" tabindex="0" aria-label="Photo. Click or press Space to toggle zoom, scroll to zoom and drag to pan.">
+    <div id="photoPlane" hidden><img id="overviewPhoto" alt="" draggable="false"><div id="tileLayer"></div>
+      <div id="cropLayer" hidden><div id="cropRect"><div class="thirds"></div><i data-corner="nw"></i><i data-corner="ne"></i><i data-corner="se"></i><i data-corner="sw"></i></div></div>
+    </div>
+    <div id="photoMessage">Opening Fieldroom…</div><div id="zoomFlash" aria-hidden="true"></div>
+   </div>
+   <div class="toolbar"><div class="tool-actions">
+     <button id="cropTool" title="Crop (R)" aria-pressed="false"><svg><use href="#crop"/></svg>Crop</button>
+     <button id="originalTool" title="Show the original tones with the same framing" aria-pressed="false"><svg><use href="#before"/></svg><span>Original</span></button>
+     <button id="applyCrop" class="primary" hidden>Apply crop</button><button id="cancelCrop" hidden>Cancel</button>
+   </div><div class="zoom-tools"><button id="zoomOut" title="Zoom out (−)" aria-label="Zoom out">−</button><select id="zoomSelect" aria-label="Zoom level"></select><button id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button></div>
+   <div class="photo-actions"><button id="trashPhoto" title="Move to Fieldroom Trash (Delete)" aria-label="Move photo to trash"><svg><use href="#trash"/></svg></button>
+     <button id="previousPhoto" title="Previous photo (←)" aria-label="Previous photo"><svg><use href="#back"/></svg></button>
+     <button id="nextPhoto" title="Next photo (→)" aria-label="Next photo"><svg><use href="#next"/></svg></button>
+   </div></div>
+ </section>
+ <aside class="right-panel" aria-label="Develop controls">
+  <section id="developPanel"><div class="hist-title"><h2>Histogram</h2><span>RGB</span></div><canvas id="histogram" width="360" height="96" aria-label="RGB histogram"></canvas><div id="adjustments"></div></section>
+  <section id="cropPanel" hidden><h2>Crop</h2><h3>Aspect ratio</h3><select id="aspect" aria-label="Crop aspect ratio"><option>Free</option><option>Original</option><option>1:1</option><option>3:2</option><option>2:3</option><option>4:5</option><option>5:4</option><option>16:9</option></select>
+    <dl><dt>Cropped size</dt><dd id="cropSize">—</dd></dl><button id="resetCrop">Reset crop</button>
+    <div class="crop-help"><p><kbd>Enter</kbd> Apply crop</p><p><kbd>Esc</kbd> Cancel crop</p><p><kbd>Space</kbd> + drag to pan</p></div>
+  </section>
+ </aside>
+</main>
+<section class="film" aria-label="Filmstrip"><header><svg><use href="#film"/></svg><h2>Filmstrip</h2><span id="filmInfo"></span><span class="film-order">Filename order</span></header><div id="filmstrip" role="listbox" aria-label="Photos"></div></section>
+<footer class="statusbar"><span id="status" role="status">Starting…</span><button id="undoTrash" hidden>Undo delete</button><span class="shortcuts">← → Browse　 R Crop　 Space Zoom　 Delete Trash</span></footer>
+<dialog id="folderDialog"><header><h2>Open folder</h2><button class="close-dialog" aria-label="Close">×</button></header>
+ <form id="pathForm"><label for="folderPath">Folder path</label><div><input id="folderPath" autocomplete="off" spellcheck="false"><button>Go</button></div></form>
+ <div class="browser-body"><div id="dialogPlaces"></div><div><button id="dialogUp"><svg><use href="#folderup"/></svg>Parent folder</button><div id="dialogFolders"></div></div></div>
+ <p id="folderError" role="status"></p><footer><button class="close-dialog">Cancel</button><button id="chooseFolder" class="primary">Open this folder</button></footer>
+</dialog>
+<dialog id="resultsDialog"><header><h2>Save results</h2><button class="close-dialog" aria-label="Close">×</button></header><div id="saveReport"></div><footer><button id="viewEdited">Open Edited</button><button class="close-dialog primary">Done</button></footer></dialog>
+</body></html>
