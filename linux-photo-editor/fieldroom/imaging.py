@@ -256,3 +256,29 @@ def histogram(image):
     sample = image.copy()
     sample.thumbnail((260, 180))
     return np.array(sample.histogram()).reshape((3, 64, 4)).sum(axis=2).tolist()
+
+
+def auto_tone(source):
+    """Estimate conservative automatic adjustments from a downsampled sRGB preview.
+
+    This produces a non-destructive editing recipe; it never changes source pixels.
+    """
+    image = render(source, recipe())
+    image.thumbnail((640, 640), Image.Resampling.BILINEAR)
+    rgb = np.asarray(image, dtype=np.float32) / 255.0
+    if rgb.size == 0:
+        return recipe()
+    lum = rgb[..., 0] * .2126 + rgb[..., 1] * .7152 + rgb[..., 2] * .0722
+    p1, p10, p50, p90, p99 = np.percentile(lum, [1, 10, 50, 90, 99])
+    # Avoid aggressive brightening of intentional low-key/night photographs.
+    exposure = float(np.clip(np.log2(.43 / max(.08, p50)), -.85, .85))
+    highlights = float(np.clip(-90 * max(0.0, p99 - .91) / .09, -45, 0))
+    shadows = float(np.clip(80 * max(0.0, .22 - p10) / .22, 0, 38))
+    whites = float(np.clip(20 * (.94 - p99), -12, 12))
+    blacks = float(np.clip(-20 * p1, -12, 0))
+    contrast = float(np.clip((.63 - (p90 - p10)) * 25, -10, 12))
+    result = recipe()
+    result.update(exposure=round(exposure, 2), highlights=round(highlights),
+                  shadows=round(shadows), whites=round(whites),
+                  blacks=round(blacks), contrast=round(contrast))
+    return result
