@@ -29,6 +29,7 @@ body {
   height: 100dvh;
   min-height: 410px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 58px minmax(0, 1fr) clamp(106px, 15.5vh, 143px) 28px;
   overflow: hidden
 }
@@ -194,6 +195,7 @@ h2 {
 .workspace {
   display: grid;
   grid-template-columns: clamp(168px, 15.2vw, 230px) minmax(0, 1fr) clamp(232px, 20.2vw, 318px);
+  min-width: 0;
   min-height: 0
 }
 
@@ -828,6 +830,7 @@ kbd {
 }
 
 .statusbar {
+  min-width: 0;
   border-top: 1px solid var(--line);
   padding: 0 13px;
   gap: 8px;
@@ -837,6 +840,7 @@ kbd {
 }
 
 #status {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -844,6 +848,7 @@ kbd {
 }
 
 .shortcuts {
+  flex: none;
   margin-left: auto;
   white-space: nowrap;
   color: var(--quiet)

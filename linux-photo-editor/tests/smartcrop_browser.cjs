@@ -311,6 +311,19 @@ async function realInference(url) {
     (parseFloat(node.style.top)+parseFloat(node.style.height))/100
   ]);
   group.crop.forEach((value,index) => assert(Math.abs(groupDrawn[index]-value)<1e-6,'The UI did not draw the group crop.'));
+  const groupLayout = await page.evaluate(() => {
+    const frame = document.getElementById('photoPlane').getBoundingClientRect();
+    const crop = document.getElementById('cropRect').getBoundingClientRect();
+    const brand = document.querySelector('.brand').getBoundingClientRect();
+    const controls = document.querySelector('.right-panel').getBoundingClientRect();
+    return {overflow:document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      scrollX:window.scrollX, brandLeft:brand.left, controlsRight:controls.right, width:window.innerWidth,
+      within:crop.left>=frame.left-1 && crop.top>=frame.top-1 && crop.right<=frame.right+1 && crop.bottom<=frame.bottom+1};
+  });
+  assert.equal(groupLayout.overflow,false,'Long group warnings expanded the application beyond the window.');
+  assert.equal(groupLayout.scrollX,0,'Selecting people scrolled the entire application sideways.');
+  assert(groupLayout.brandLeft>=0 && groupLayout.controlsRight<=groupLayout.width+1,'Group preview clipped the left or right application panel.');
+  assert(groupLayout.within,'Group crop overlay lies outside the displayed photo.');
   if (process.env.FIELDROOM_GROUPCROP_SCREENSHOT) {
     const screenshot = path.resolve(process.env.FIELDROOM_GROUPCROP_SCREENSHOT);
     fs.mkdirSync(path.dirname(screenshot),{recursive:true});
