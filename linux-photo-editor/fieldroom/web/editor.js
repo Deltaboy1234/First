@@ -808,6 +808,56 @@ $("viewEdited").onclick = () => {
   if (folderToShow) openFolder(folderToShow);
 };
 document.querySelectorAll(".close-dialog").forEach(b => b.onclick = () => b.closest("dialog").close());
+function addSmartCropControls() {
+  const panel = $("cropPanel");
+  const heading = document.createElement("h3");
+  heading.textContent = "AI Smart Crop · Offline";
+  const select = document.createElement("select");
+  select.id = "smartCropPreset";
+  select.setAttribute("aria-label", "AI crop framing");
+  for (const [value, label] of [
+    ["very-tight", "Very Tight · Face"], ["tight", "Tight · Face and shoulders"],
+    ["normal", "Normal · Head and shoulders"], ["loose", "Loose · Environmental"],
+    ["full-body", "Full Body · Head to toe"]
+  ]) select.add(new Option(label, value));
+  select.value = "tight";
+  const run = document.createElement("button");
+  run.id = "suggestCrop";
+  run.textContent = "Preview AI Crop";
+  const notice = document.createElement("p");
+  notice.id = "smartCropNotice";
+  notice.setAttribute("role", "status");
+  notice.style.margin = "8px 0";
+  notice.style.fontSize = "12px";
+  notice.style.color = "var(--muted)";
+  async function suggest() {
+    const p = active();
+    if (!p || busy || !viewport.box) return;
+    run.disabled = true;
+    notice.textContent = "Detecting subject locally…";
+    const id = p.id;
+    try {
+      const result = await api("smart_crop", {id, preset: select.value});
+      if (active()?.id !== id) return;
+      if (!viewport.draft) startCrop();
+      viewport.draft = result.crop;
+      viewport.aspect = "Free";
+      $("aspect").value = "Free";
+      viewport.drawCrop();
+      notice.textContent = result.warning || "Review the crop, then press Apply Crop or Cancel.";
+      status(result.warning || "AI crop preview ready. No edit applied yet.");
+    } catch (error) { notice.textContent = error.message; fail(error); }
+    finally { run.disabled = false; }
+  }
+  run.onclick = suggest;
+  select.onchange = () => { if (viewport.draft) suggest(); };
+  const container = document.createElement("div");
+  container.className = "smart-crop-controls";
+  container.append(heading, select, run, notice);
+  panel.insertBefore(container, panel.querySelector("h3"));
+}
+addSmartCropControls();
+
 function togglePhotoOnly() {
   document.body.classList.toggle("photo-only");
   viewport.schedule();
