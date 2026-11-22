@@ -126,6 +126,30 @@ function updateAdjustments() {
 }
 
 function createAdjustments() {
+  const auto = document.createElement("button");
+  auto.id = "autoTone";
+  auto.className = "primary";
+  auto.textContent = "Auto Tone";
+  auto.title = "Analyze this photo locally and suggest conservative adjustments";
+  auto.onclick = async () => {
+    const p = active();
+    if (!p || busy) return;
+    auto.disabled = true;
+    try {
+      const result = await api("auto_tone", {id: p.id});
+      // Retain existing crop and detail controls; Auto Tone changes basic sliders only.
+      for (const key of ["exposure","contrast","highlights","shadows","whites","blacks"])
+        p.recipe[key] = result.recipe[key];
+      original = false;
+      updateAdjustments();
+      mark(p);
+      queuePreview();
+      queueThumb(p);
+      status("Auto Tone applied locally to " + p.name);
+    } catch (error) { fail(error); }
+    finally { auto.disabled = false; }
+  };
+  $("adjustments").append(auto);
   for (const [title, specs] of Object.entries(controls)) {
     const details = document.createElement("details");
     details.open = title === "Basic";
@@ -535,6 +559,7 @@ function toggleTools() {
   $("undoTrash").hidden = !deleted.length;
   $("undoTrash").disabled = busy;
   $("resetAll").disabled = !p || busy;
+  $("autoTone").disabled = !p || busy;
 }
 
 function startCrop() {
@@ -783,6 +808,17 @@ $("viewEdited").onclick = () => {
   if (folderToShow) openFolder(folderToShow);
 };
 document.querySelectorAll(".close-dialog").forEach(b => b.onclick = () => b.closest("dialog").close());
+function togglePhotoOnly() {
+  document.body.classList.toggle("photo-only");
+  viewport.schedule();
+  window.dispatchEvent(new Event("resize"));
+}
+const photoOnlyButton = document.createElement("button");
+photoOnlyButton.id = "photoOnly";
+photoOnlyButton.textContent = "Photo Only (F)";
+photoOnlyButton.title = "Toggle distraction-free photo viewing";
+photoOnlyButton.onclick = togglePhotoOnly;
+document.querySelector(".photo-actions").prepend(photoOnlyButton);
 document.addEventListener("keydown", e => {
   if (busy || document.querySelector("dialog[open]") || !defaults) return;
   const modifier = e.ctrlKey || e.metaKey,
@@ -803,6 +839,12 @@ document.addEventListener("keydown", e => {
     e.preventDefault();
     undo();
     return;
+  }
+  if (k === "f" && !modifier && !e.altKey && !e.repeat) {
+    e.preventDefault(); togglePhotoOnly(); return;
+  }
+  if (k === "escape" && document.body.classList.contains("photo-only")) {
+    e.preventDefault(); togglePhotoOnly(); return;
   }
   if (!active() || e.altKey) return;
   if ((k === "=" || k === "+" || k === "-") && viewport.box) {
