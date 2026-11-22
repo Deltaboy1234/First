@@ -15,10 +15,10 @@ if ! "$python_cmd" -m venv "$install_dir/venv"; then
     echo "Install your distribution's Python venv package and run this installer again." >&2
     exit 1
 fi
-"$install_dir/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$source_dir"
-launcher="$install_dir/venv/bin/fieldroom"
-if [[ ! -e "$bin_dir/fieldroom" && ! -L "$bin_dir/fieldroom" ]]; then
-    ln -s "$launcher" "$bin_dir/fieldroom"
+"$install_dir/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$source_dir[desktop]"
+launcher="$install_dir/venv/bin/fieldroom-desktop"
+if [[ ! -e "$bin_dir/fieldroom-desktop" && ! -L "$bin_dir/fieldroom" ]]; then
+    ln -s "$launcher" "$bin_dir/fieldroom-desktop"
 fi
 cp "$source_dir/fieldroom/web/icon.svg" "$install_dir/icon.svg"
 "$install_dir/venv/bin/python" - "$launcher" "$install_dir/icon.svg" "$data_home/applications/io.github.deltaboy1234.Fieldroom.desktop" <<'PY'
