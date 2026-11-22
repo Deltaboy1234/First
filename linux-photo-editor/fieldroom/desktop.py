@@ -10,9 +10,12 @@ import os
 from pathlib import Path
 import threading
 
+from . import __version__
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fieldroom desktop editor")
+    parser.add_argument("--version", action="version", version=f"Fieldroom {__version__}")
     parser.add_argument("folder", nargs="?", type=Path, help="initial photo folder")
     args = parser.parse_args()
     if args.folder and not args.folder.expanduser().is_dir():
@@ -43,7 +46,7 @@ def main() -> None:
         class Window(QMainWindow):
             def __init__(self):
                 super().__init__()
-                self.setWindowTitle("Fieldroom — Develop")
+                self.setWindowTitle(f"Fieldroom {__version__} — Develop")
                 self.resize(1500, 920)
                 self.browser = QWebEngineView(self)
                 self.browser.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)

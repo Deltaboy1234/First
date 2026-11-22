@@ -1,6 +1,79 @@
 # Fieldroom for Linux
 
-Fieldroom opens a folder of photos in a Classic Develop workspace. The left panel holds the folder browser and Navigator. The filmstrip runs along the bottom. Basic adjustments, noise reduction and sharpening sit on the right. Image processing runs on your computer and the interface opens in your desktop browser.
+Fieldroom 0.3.0 opens a folder of photos in its own Linux desktop window. The left panel holds the folder browser and Navigator, the filmstrip runs along the bottom, and the editing controls sit on the right. Auto Tone, manual editing, RAW development, and Smart Crop run on your computer.
+
+The desktop application uses a **Qt window with an embedded local web interface**. It does not open your normal browser, but it is not a rewrite using native Qt widgets. Its Python service listens only on the local loopback interface. After the initial installation downloads the dependencies and approximately **36.1 MB of detection models**, editing and Smart Crop work without an internet connection or an AI account. Photos are not sent to a cloud service.
+
+## Install the Linux desktop application
+
+You need Python 3.10 or newer, Git, and Python's venv module. On Pop!_OS, Ubuntu, Debian, or Linux Mint, install `python3-venv` if Python reports that venv or ensurepip is unavailable.
+
+For a new checkout:
+
+```bash
+git clone --branch feature/fieldroom-linux-desktop --single-branch https://github.com/Deltaboy1234/First.git
+cd First/linux-photo-editor
+bash install.sh
+```
+
+For an existing checkout at `~/First`, close Fieldroom and update it with:
+
+```bash
+cd "$HOME/First"
+git fetch origin
+git switch feature/fieldroom-linux-desktop
+git pull --ff-only origin feature/fieldroom-linux-desktop
+cd linux-photo-editor
+bash install.sh
+```
+
+The installer creates a per-user environment, installs the tested OpenCV version, verifies both model downloads, and checks that the detectors can load. It adds **Fieldroom** to the applications menu. Open that entry, or launch it directly:
+
+```bash
+"$HOME/.local/share/fieldroom/venv/bin/fieldroom-desktop"
+```
+
+To open a mounted drive or another specific folder, pass its quoted path:
+
+```bash
+"$HOME/.local/share/fieldroom/venv/bin/fieldroom-desktop" "/media/delta/Samsung USB"
+```
+
+The application also accepts folder paths in **Open folder**. Starting without a folder opens disposable sample photographs. The installer creates `~/.local/bin/fieldroom-desktop` and a compatibility `fieldroom` launcher when those names are available; it preserves unrelated existing files. If you use `XDG_DATA_HOME`, the environment lives under that directory instead of `~/.local/share`.
+
+You can also download a ZIP of the **feature/fieldroom-linux-desktop** branch while signed in to GitHub, extract it, and run `bash install.sh` from its `linux-photo-editor` folder. A ZIP checkout must be updated with another ZIP rather than `git pull`.
+
+## Smart Crop: preview before applying
+
+1. Open a photograph, then click **Crop** or press **R**.
+2. Choose **Very Tight**, **Tight**, **Normal**, **Loose**, or **Full Body**. Tight is the default portrait framing.
+3. Click **Preview AI Crop**. The detector runs locally on the complete, oriented photograph, before any existing crop.
+4. Review the proposed rectangle. If several subjects are available, choose the person you want. You can change the preset, move the rectangle, or resize its corners.
+5. Click **Apply Crop** or press **Enter** to accept the preview. **Cancel** or **Esc** leaves the accepted crop unchanged. Save the edited JPEG when you are ready.
+
+Portrait presets need a confidently detected face. If no face is detected reliably, Fieldroom keeps your current crop and explains the problem; it does not guess a center crop or invent a head position from a body box. Try **Full Body** when the person is visible but their face is turned away, or crop manually. Full Body uses the whole detected person and includes breathing room; it preserves the visible body but cannot restore feet, hands, or a head that were outside the original photo. Detection can still miss a subject, particularly with occlusion, unusual poses, or a small face, so always review the preview.
+
+YuNet face detection and YOLOX person detection replace the earlier Haar/HOG implementation. The models are verified by exact size and SHA-256 checksum. Inference never downloads a model, and a missing or damaged model produces a setup error instead of falling back to the old detector.
+
+### Check or prepare an offline installation
+
+The default model directory is `~/.local/share/fieldroom/models` (or `$XDG_DATA_HOME/fieldroom/models`). Run this read-only check without opening a window:
+
+```bash
+"$HOME/.local/share/fieldroom/venv/bin/python" -m fieldroom.models --check
+```
+
+To repair a model download while online:
+
+```bash
+"$HOME/.local/share/fieldroom/venv/bin/python" -m fieldroom.models --download
+```
+
+For a machine that will stay offline, install the application and dependencies while connected first, or transfer compatible dependency wheels separately. Copy the two verified `.onnx` files to its model directory. `FIELDROOM_MODEL_DIR` can point the application to a portable model folder; the command-line checker and installer also accept that setting. The model tool supports `--directory /path/to/models` for an explicit location. It reuses valid files, verifies downloads before replacing them, and removes incomplete downloads after a failure.
+
+## Desktop view controls
+
+**F** toggles Photo Only view; **F** or **Esc** returns to the editor. **F11** toggles the desktop window's full-screen mode. **← / →** moves between photographs. **Auto Tone** adjusts the tonal controls locally and can be refined with the sliders.
 
 ## Try it in a browser first
 
@@ -10,22 +83,9 @@ In the browser trial, **Delete** removes a photo from the current selection. **S
 
 To rebuild the portable trial from source, run `python3 browser-trial/build.py Fieldroom-Browser-Trial.html` with Pillow installed. It bundles three scikit-image samples and a single-threaded, hash-verified WebAssembly build of **LibRaw dcraw_emu**. One background worker develops a RAW at a time. The resulting HTML works offline. The decoder notice and source are under **Open photos → RAW decoder credits**. [Matching LibRaw source and build system](https://github.com/radiantlab/LibRaw/tree/c9d6743ab87feb7cbe970675099cb64ee9abda19)
 
-## Install and start
+The browser trial is a separate demonstration and does not include the desktop Smart Crop feature. The `fieldroom` Python entry point still opens the older local-browser mode for development; the desktop launcher is `fieldroom-desktop`.
 
-From a Linux desktop with Python 3.10 or newer, Git and Python's venv module, run:
-
-```bash
-git clone https://github.com/Deltaboy1234/First.git
-cd First/linux-photo-editor
-bash install.sh
-"$HOME/.local/bin/fieldroom"
-```
-
-The first install downloads Pillow, NumPy and rawpy. The installer creates a per-user environment and a **Fieldroom** entry in the applications menu. On Ubuntu, Debian or Linux Mint, install `python3-venv` if Python reports that venv or ensurepip is unavailable. For an existing checkout, pull the latest changes and rerun `bash install.sh`.
-
-You can also download the repository ZIP while signed in to GitHub, extract it and run `bash install.sh` from its `linux-photo-editor` folder. Launch Fieldroom without a folder to try six disposable sample photos. To open a specific folder, run `"$HOME/.local/bin/fieldroom" "/path/to/photos"`. **Open folder** accepts a pasted path and lists mounted drives.
-
-On Windows, double-click **Test-Fieldroom.cmd** for a trial. It uses an available Python environment, including the Codex photo libraries when present. If that runtime lacks rawpy, the launcher installs the RAW decoder for your account on the first run. With the standard Python launcher, it can create a project-local virtual environment for the full editor.
+On Windows, **Test-Fieldroom.cmd** remains a separate browser-mode trial. It uses an available Python environment and may install the RAW decoder on its first run.
 
 ## Inspect focus and noise
 
@@ -51,6 +111,19 @@ The editor loads lossless tiles from the oriented, full-resolution source for de
 **Original** compares the original tones with the edited tones using the same crop and zoom. RAW decoding uses LibRaw through rawpy. Support depends on camera model and compression. A Nikon NEF recorded with an unsupported compression can appear in the filmstrip while development reports a decoder error.
 
 ## Project and photo credits
+
+### Offline detection models
+
+Both model files are from [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/48b10fa505aeb51fbd127fc60a5c660040e823b7), pinned to commit `48b10fa505aeb51fbd127fc60a5c660040e823b7`:
+
+| Model | Purpose | License | Size |
+| --- | --- | --- | ---: |
+| [YuNet 2023mar](https://github.com/opencv/opencv_zoo/tree/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_detection_yunet) | Face location and confidence | [MIT; copyright Shiqi Yu](fieldroom/licenses/YuNet-MIT.txt) | 232,589 bytes |
+| [YOLOX-s 2022nov](https://github.com/opencv/opencv_zoo/tree/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/object_detection_yolox) | Person location and confidence | [Apache-2.0](fieldroom/licenses/YOLOX-Apache-2.0.txt) | 35,858,002 bytes |
+
+The full upstream license texts ship with Fieldroom. Download URLs and SHA-256 checksums are recorded in `fieldroom/models.py`. Model files are downloaded during setup instead of being committed to this repository. The implementation follows the model preprocessing and output formats documented by OpenCV Zoo. YuNet is used only to locate faces; Fieldroom does not recognize anyone's identity.
+
+### Layout and sample photographs
 
 Layout A was selected in the [original design review](design-review/Fieldroom-Develop-Overview.jpg). The [interactive design picker](design-review/Fieldroom-Design-Picker.html) also remains available.
 

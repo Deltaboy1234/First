@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fieldroom-editor"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local, folder-based photo editor with a Classic Develop workspace"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.26", "Pillow>=10.3", "rawpy>=0.25.1"]
 
 [project.optional-dependencies]
-desktop = ["PySide6>=6.7", "PySide6-Addons>=6.7", "opencv-python-headless>=4.9"]
+desktop = ["PySide6>=6.7", "PySide6-Addons>=6.7", "opencv-python-headless==4.10.0.84"]
 
 
 [project.scripts]
@@ -21,7 +21,7 @@ fieldroom-desktop = "fieldroom.desktop:main"
 packages = ["fieldroom"]
 
 [tool.setuptools.package-data]
-fieldroom = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg"]
+fieldroom = ["web/*.html", "web/*.css", "web/*.js", "web/*.svg", "licenses/*"]
 
 [tool.setuptools.data-files]
 "share/fieldroom" = ["design-review/Fieldroom-Design-Picker.html"]

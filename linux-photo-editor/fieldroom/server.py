@@ -66,7 +66,8 @@ class EditorServer(ThreadingHTTPServer):
                 return export(photo, data["recipe"])
         if route == "smart_crop":
             from .smartcrop import suggest
-            return suggest(photo.path, data.get("preset", "tight"))
+            return suggest(photo.path, data.get("preset", "tight"),
+                           subject_id=data.get("subject_id"), aspect=data.get("aspect", "Free"))
         if route == "auto_tone":
             source = im.decode(photo.path, 960)
             return {"recipe": im.auto_tone(source)}

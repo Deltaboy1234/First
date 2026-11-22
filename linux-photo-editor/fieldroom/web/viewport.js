@@ -8,6 +8,7 @@ class PhotoViewport {
   constructor({
     loadTile,
     onCrop,
+    onCropEdit,
     onError
   }) {
     this.view = byId("viewport");
@@ -16,6 +17,7 @@ class PhotoViewport {
     this.nav = byId("navSurface");
     this.loadTile = loadTile;
     this.onCrop = onCrop;
+    this.onCropEdit = onCropEdit;
     this.onError = onError;
     this.mode = "fit";
     this.nearMode = "fit";
@@ -466,6 +468,8 @@ class PhotoViewport {
         this.drag.kind = "pan";
         if (this.space) this.usedSpace = true;
       } else if (this.draft) {
+        // A user's drag takes precedence over any inference still in flight.
+        this.onCropEdit?.();
         const [a, b, c, d] = this.draft, [x, y] = start;
         this.drag.crop = [...this.draft];
         const corner = e.target.closest("[data-corner]")?.dataset.corner;

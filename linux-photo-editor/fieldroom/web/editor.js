@@ -29,6 +29,14 @@ let revision = 0,
   pending = null,
   rendering = false,
   renderTimer;
+const smartCrop = {
+  ticket: 0,
+  controller: null,
+  loading: false,
+  previewActive: false,
+  subjects: [],
+  selectedSubject: null
+};
 
 function status(message) {
   $("status").textContent = message;
@@ -60,7 +68,7 @@ function icon(name) {
   svg.append(use);
   return svg;
 }
-async function api(route, data = {}, binary = false) {
+async function api(route, data = {}, binary = false, signal) {
   if (browserTrial) return browserTrial.request(route, data);
   const response = await fetch("/api/" + route, {
     method: "POST",
@@ -68,7 +76,8 @@ async function api(route, data = {}, binary = false) {
       "Content-Type": "application/json",
       "X-Fieldroom-Key": apiKey
     },
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
+    signal
   });
   if (!response.ok) {
     const e = await response.json().catch(() => ({}));
@@ -81,6 +90,7 @@ const viewport = new PhotoViewport({
   onCrop: (w, h) => {
     $("cropSize").textContent = `${w.toLocaleString()} × ${h.toLocaleString()} px`;
   },
+  onCropEdit: () => invalidateSmartCrop("Manual crop adjustment. Apply crop to keep it, or Cancel."),
   onError: fail
 });
 const controls = {
@@ -399,6 +409,7 @@ async function openFolder(path, pick) {
 }
 
 function applyFolder(result, pick) {
+  invalidateSmartCrop("", true);
   if (viewport.draft) viewport.endCrop();
   original = false;
   folder = result;
@@ -502,6 +513,7 @@ function pumpThumbs() {
 
 function selectPhoto(id, force = false) {
   if (busy || (!force && id === selected)) return;
+  invalidateSmartCrop("", true);
   if (viewport.draft) viewport.endCrop();
   original = false;
   cancelQueuedView();
@@ -560,15 +572,18 @@ function toggleTools() {
   $("undoTrash").disabled = busy;
   $("resetAll").disabled = !p || busy;
   $("autoTone").disabled = !p || busy;
+  syncSmartCropControls();
 }
 
 function startCrop() {
   const p = active();
-  if (!p || !viewport.box || busy) return;
+  if (!p || busy) return;
   if (viewport.draft) {
-    finishCrop(true);
+    finishCrop(false);
     return;
   }
+  if (!viewport.box) return;
+  invalidateSmartCrop("Choose a framing preset, then preview the crop. Your original stays unchanged.");
   original = false;
   viewport.beginCrop(p.recipe.crop);
   viewport.clear("Opening crop…");
@@ -579,18 +594,26 @@ function startCrop() {
 function finishCrop(accept) {
   const p = active();
   if (!p || !viewport.draft) return;
+  if (accept && (smartCrop.loading || !viewport.box)) {
+    status("Wait for the preview, or cancel detection before applying your crop.");
+    return;
+  }
+  invalidateSmartCrop("");
   const rect = viewport.endCrop();
   if (accept) {
     p.recipe.crop = rect;
     mark(p);
     queueThumb(p);
     status(`Crop accepted for ${p.name}`);
+  } else {
+    status("Crop preview cancelled. Your previous crop is unchanged.");
   }
   toggleTools();
   queuePreview();
 }
 
 function setBusy(value) {
+  if (value) invalidateSmartCrop("");
   busy = value;
   document.querySelector(".workspace").inert = value;
   $("filmstrip").inert = value;
@@ -647,7 +670,10 @@ async function undo() {
 }
 async function saveAll() {
   if (!folder || busy) return;
-  if (viewport.draft) finishCrop(true);
+  if (viewport.draft) {
+    status("Apply or cancel the crop preview before saving.");
+    return;
+  }
   const jobs = new Map(folder.photos.map(p => [p.id, records.get(p.id)]));
   for (const p of records.values())
     if (dirty(p)) jobs.set(p.id, p);
@@ -769,8 +795,19 @@ $("originalTool").onclick = () => {
   toggleTools();
   queuePreview();
 };
-$("aspect").onchange = e => viewport.setAspect(e.target.value);
+$("aspect").onchange = e => {
+  if (!viewport.draft || busy) return;
+  if (smartCrop.loading || smartCrop.previewActive) {
+    // Let the detector expand the framing around the subject instead of trimming it.
+    return suggestSmartCrop();
+  } else {
+    invalidateSmartCrop("Aspect ratio changed. Review the crop before applying it.");
+    viewport.setAspect(e.target.value);
+  }
+};
 $("resetCrop").onclick = () => {
+  if (!viewport.draft || busy) return;
+  invalidateSmartCrop("Crop reset to the full photo. Apply crop to keep it, or Cancel.");
   viewport.draft = [0, 0, 1, 1];
   viewport.aspect = "Free";
   $("aspect").value = "Free";
@@ -808,6 +845,109 @@ $("viewEdited").onclick = () => {
   if (folderToShow) openFolder(folderToShow);
 };
 document.querySelectorAll(".close-dialog").forEach(b => b.onclick = () => b.closest("dialog").close());
+function syncSmartCropControls() {
+  const available = !!active() && !!viewport.draft && !busy;
+  const run = $("suggestCrop");
+  if (!run) return;
+  run.disabled = !available || !viewport.box || smartCrop.loading || !!browserTrial;
+  run.textContent = smartCrop.loading ? "Detecting subject…" : "Preview AI Crop";
+  $("smartCropPreset").disabled = !available || !!browserTrial;
+  $("smartCropSubject").disabled = !available || !!browserTrial;
+  $("cancelDetection").hidden = !smartCrop.loading;
+  $("smartCropControls").setAttribute("aria-busy", String(smartCrop.loading));
+  $("applyCrop").disabled = !available || !viewport.box || smartCrop.loading;
+  $("cancelCrop").disabled = busy;
+}
+
+function invalidateSmartCrop(message, clearSubjects = false) {
+  smartCrop.ticket++;
+  smartCrop.controller?.abort();
+  if (smartCrop.loading && $("aspect")) $("aspect").value = viewport.aspect;
+  smartCrop.controller = null;
+  smartCrop.loading = false;
+  smartCrop.previewActive = false;
+  if (clearSubjects) {
+    smartCrop.subjects = [];
+    smartCrop.selectedSubject = null;
+    if ($("smartCropSubject")) updateSmartCropSubjects();
+  }
+  if ($("smartCropNotice") && message !== undefined) {
+    $("smartCropNotice").textContent = browserTrial ?
+      "AI Smart Crop is available in the Linux desktop app with its offline models installed. Manual crop works here." : message;
+  }
+  syncSmartCropControls();
+}
+
+function updateSmartCropSubjects() {
+  const select = $("smartCropSubject");
+  select.replaceChildren();
+  for (const subject of smartCrop.subjects) {
+    select.add(new Option(subject.label || "Detected subject", String(subject.id)));
+  }
+  if (smartCrop.selectedSubject !== null) select.value = String(smartCrop.selectedSubject);
+  $("smartCropSubjectField").hidden = smartCrop.subjects.length < 2;
+}
+
+function validCrop(crop) {
+  return Array.isArray(crop) && crop.length === 4 &&
+    crop.every(n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1) &&
+    crop[0] < crop[2] && crop[1] < crop[3];
+}
+
+async function suggestSmartCrop() {
+  const p = active();
+  if (!p || busy || !viewport.box || !viewport.draft || browserTrial) return;
+  smartCrop.controller?.abort();
+  const controller = new AbortController();
+  const ticket = ++smartCrop.ticket;
+  const id = p.id;
+  smartCrop.controller = controller;
+  smartCrop.loading = true;
+  const notice = $("smartCropNotice");
+  notice.textContent = "Detecting the subject on this computer…";
+  syncSmartCropControls();
+  const current = () => ticket === smartCrop.ticket && active()?.id === id && !!viewport.draft;
+  try {
+    const result = await api("smart_crop", {
+      id,
+      preset: $("smartCropPreset").value,
+      subject_id: smartCrop.selectedSubject,
+      aspect: $("aspect").value
+    }, false, controller.signal);
+    if (!current()) return;
+    smartCrop.subjects = Array.isArray(result.subjects) ? result.subjects : [];
+    smartCrop.selectedSubject = result.selected_subject ?? null;
+    updateSmartCropSubjects();
+    if (!validCrop(result.crop)) {
+      if (result.crop !== null && result.crop !== undefined) throw Error("The crop suggestion was invalid. Your crop is unchanged.");
+      smartCrop.previewActive = false;
+      $("aspect").value = viewport.aspect;
+      notice.textContent = result.warning || "Subject not detected. Your crop is unchanged; adjust it manually or try another framing preset.";
+      status(notice.textContent);
+      return;
+    }
+    viewport.draft = [...result.crop];
+    const aspect = [...$("aspect").options].some(option => option.value === result.aspect) ? result.aspect : $("aspect").value;
+    viewport.aspect = aspect;
+    $("aspect").value = aspect;
+    viewport.drawCrop();
+    smartCrop.previewActive = true;
+    notice.textContent = [result.warning, "Review the crop, then choose Apply crop or Cancel. You can also move or resize it."].filter(Boolean).join(" ");
+    status(result.warning || "AI crop preview ready. No edit applied yet.");
+  } catch (error) {
+    if (!current() || error.name === "AbortError") return;
+    $("aspect").value = viewport.aspect;
+    notice.textContent = error.message || String(error);
+    fail(error);
+  } finally {
+    if (ticket === smartCrop.ticket) {
+      smartCrop.controller = null;
+      smartCrop.loading = false;
+      syncSmartCropControls();
+    }
+  }
+}
+
 function addSmartCropControls() {
   const panel = $("cropPanel");
   const heading = document.createElement("h3");
@@ -821,40 +961,41 @@ function addSmartCropControls() {
     ["full-body", "Full Body · Head to toe"]
   ]) select.add(new Option(label, value));
   select.value = "tight";
+  const subjectField = document.createElement("div");
+  subjectField.id = "smartCropSubjectField";
+  subjectField.hidden = true;
+  const subjectLabel = document.createElement("label");
+  subjectLabel.htmlFor = "smartCropSubject";
+  subjectLabel.textContent = "Choose the subject";
+  const subjectSelect = document.createElement("select");
+  subjectSelect.id = "smartCropSubject";
+  subjectSelect.onchange = () => {
+    smartCrop.selectedSubject = subjectSelect.value;
+    return suggestSmartCrop();
+  };
+  subjectField.append(subjectLabel, subjectSelect);
   const run = document.createElement("button");
   run.id = "suggestCrop";
   run.textContent = "Preview AI Crop";
+  const cancel = document.createElement("button");
+  cancel.id = "cancelDetection";
+  cancel.textContent = "Cancel detection";
+  cancel.hidden = true;
+  cancel.onclick = () => {
+    invalidateSmartCrop("Detection cancelled. Your crop is unchanged.");
+    status("Detection cancelled. Your crop is unchanged.");
+  };
   const notice = document.createElement("p");
   notice.id = "smartCropNotice";
   notice.setAttribute("role", "status");
-  notice.style.margin = "8px 0";
-  notice.style.fontSize = "12px";
-  notice.style.color = "var(--muted)";
-  async function suggest() {
-    const p = active();
-    if (!p || busy || !viewport.box) return;
-    run.disabled = true;
-    notice.textContent = "Detecting subject locally…";
-    const id = p.id;
-    try {
-      const result = await api("smart_crop", {id, preset: select.value});
-      if (active()?.id !== id) return;
-      if (!viewport.draft) startCrop();
-      viewport.draft = result.crop;
-      viewport.aspect = "Free";
-      $("aspect").value = "Free";
-      viewport.drawCrop();
-      notice.textContent = result.warning || "Review the crop, then press Apply Crop or Cancel.";
-      status(result.warning || "AI crop preview ready. No edit applied yet.");
-    } catch (error) { notice.textContent = error.message; fail(error); }
-    finally { run.disabled = false; }
-  }
-  run.onclick = suggest;
-  select.onchange = () => { if (viewport.draft) suggest(); };
+  run.onclick = suggestSmartCrop;
+  select.onchange = suggestSmartCrop;
   const container = document.createElement("div");
+  container.id = "smartCropControls";
   container.className = "smart-crop-controls";
-  container.append(heading, select, run, notice);
+  container.append(heading, select, subjectField, run, cancel, notice);
   panel.insertBefore(container, panel.querySelector("h3"));
+  invalidateSmartCrop("");
 }
 addSmartCropControls();
 
@@ -875,6 +1016,10 @@ document.addEventListener("keydown", e => {
     k = e.key.toLowerCase(),
     typing = e.target.matches("textarea,input:not([type=range]),[contenteditable=true]");
   if (typing) return;
+  // Let keyboard activation reach the focused control. In particular, Enter on
+  // Preview AI Crop must run detection, not accept the existing draft first.
+  if (!modifier && e.target.matches("button,select") && ["enter", " "].includes(k)) return;
+  if (e.target.tagName === "SELECT" && k === "escape") return;
   if (modifier && k === "o") {
     e.preventDefault();
     showFolders();
