@@ -1,6 +1,6 @@
 # Fieldroom for Linux
 
-Fieldroom 0.3.0 opens a folder of photos in its own Linux desktop window. The left panel holds the folder browser and Navigator, the filmstrip runs along the bottom, and the editing controls sit on the right. Auto Tone, manual editing, RAW development, and Smart Crop run on your computer.
+Fieldroom 0.3.1 opens a folder of photos in its own Linux desktop window. The left panel holds the folder browser and Navigator, the filmstrip runs along the bottom, and the editing controls sit on the right. Auto Tone, manual editing, RAW development, and Smart Crop run on your computer.
 
 The desktop application uses a **Qt window with an embedded local web interface**. It does not open your normal browser, but it is not a rewrite using native Qt widgets. Its Python service listens only on the local loopback interface. After the initial installation downloads the dependencies and approximately **36.1 MB of detection models**, editing and Smart Crop work without an internet connection or an AI account. Photos are not sent to a cloud service.
 
@@ -48,10 +48,12 @@ You can also download a ZIP of the **feature/fieldroom-linux-desktop** branch wh
 1. Open a photograph, then click **Crop** or press **R**.
 2. Choose **Very Tight**, **Tight**, **Normal**, **Loose**, or **Full Body**. Tight is the default portrait framing.
 3. Click **Preview AI Crop**. The detector runs locally on the complete, oriented photograph, before any existing crop.
-4. Review the proposed rectangle. If several subjects are available, choose the person you want. You can change the preset, move the rectangle, or resize its corners.
+4. Review the proposed rectangle. Under **Include in crop**, tick the people you want to include, or choose **All people**. You can select one person, any combination, or everyone detected. The preview updates as you change the selection. You can also change the preset, move the rectangle, or resize its corners.
 5. Click **Apply Crop** or press **Enter** to accept the preview. **Cancel** or **Esc** leaves the accepted crop unchanged. Save the edited JPEG when you are ready.
 
-Portrait presets need a confidently detected face. If no face is detected reliably, Fieldroom keeps your current crop and explains the problem; it does not guess a center crop or invent a head position from a body box. Try **Full Body** when the person is visible but their face is turned away, or crop manually. Full Body uses the whole detected person and includes breathing room; it preserves the visible body but cannot restore feet, hands, or a head that were outside the original photo. Detection can still miss a subject, particularly with occlusion, unusual poses, or a small face, so always review the preview.
+An individual portrait preset needs a confidently detected face. If no face is detected reliably, Fieldroom keeps your current crop and explains the problem; it does not guess a center crop or invent a head position from a body box. Try **Full Body** when the person is visible but their face is turned away, or crop manually. Full Body uses the whole detected person and includes breathing room; it preserves the visible body but cannot restore feet, hands, or a head that were outside the original photo. Detection can still miss a subject, particularly with occlusion, unusual poses, or a small face, so always review the preview.
+
+For multiple selected people, portrait framing surrounds all selected faces with headroom. If a selected person's face is unclear but their body is detected, the group preview includes their visible body and explains why the framing is wider. Full Body requires a detected body outline for every selected person. Aspect ratios expand the frame to keep the selected people; if a ratio cannot fit them, Fieldroom uses Free and explains the constraint. Unchecking everyone leaves your crop alone until you choose someone. A crop is a rectangle around the selection, so an unselected person standing between selected people may still appear inside it.
 
 YuNet face detection and YOLOX person detection replace the earlier Haar/HOG implementation. The models are verified by exact size and SHA-256 checksum. Inference never downloads a model, and a missing or damaged model produces a setup error instead of falling back to the old detector.
 

@@ -44,6 +44,18 @@ class _Subject:
                 "confidence": round(d.confidence, 3), "kind": d.kind}
 
 
+@dataclass(frozen=True)
+class _Group:
+    members: tuple[_Subject, ...]
+    id: str = "all"
+
+    def public(self):
+        return {"id": self.id, "label": f"All people ({len(self.members)})",
+                "box": _union(s.detection.box for s in self.members),
+                "confidence": round(min(s.detection.confidence for s in self.members), 3),
+                "kind": "group", "member_ids": [s.id for s in self.members]}
+
+
 _ANALYSIS_LOCK = threading.Lock()
 _CACHE = OrderedDict()
 
@@ -128,10 +140,22 @@ def _subjects(detections):
 
 
 def _response(status, subjects=(), selected=None, crop=None, method="none", warning=None, aspect="Free"):
+    choices = [s.public() for s in subjects]
+    if len(subjects) > 1:
+        choices.append(_Group(tuple(subjects)).public())
+    selected_subjects = ([s.id for s in selected.members] if isinstance(selected, _Group)
+                         else [selected.id] if selected else [])
     return {"status": status, "crop": crop, "method": method,
-            "subjects": [s.public() for s in subjects],
+            "subjects": choices,
             "selected_subject": selected.id if selected else None,
+            "selected_subjects": selected_subjects,
             "warning": warning, "aspect": aspect}
+
+
+def _union(boxes):
+    boxes = tuple(boxes)
+    return [min(b[0] for b in boxes), min(b[1] for b in boxes),
+            max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
 def _clamp(box):
@@ -194,12 +218,64 @@ def _validate(preset, aspect):
         raise ValueError("Unknown Smart Crop aspect ratio.")
 
 
-def suggest_from_analysis(analysis, preset="tight", subject_id=None, aspect="Free"):
+def _ready(analysis, subjects, selected, box, method, warnings, aspect):
+    box, fitted_aspect, warning = _aspect(box, aspect, analysis.size)
+    if warning:
+        warnings.append(warning.replace("the subject intact", "everyone in the frame")
+                        if isinstance(selected, _Group) else warning)
+    width = (box[2]-box[0]) * analysis.size[0]
+    height = (box[3]-box[1]) * analysis.size[1]
+    if min(width, height) < 512 or width*height < 1_000_000:
+        warnings.append("This crop has limited resolution. Check the cropped size before exporting; Fieldroom does not upscale it.")
+    # Round outward so serialization cannot shave off a boundary at the edge.
+    crop = [math.floor(box[0]*1e6)/1e6, math.floor(box[1]*1e6)/1e6,
+            math.ceil(box[2]*1e6)/1e6, math.ceil(box[3]*1e6)/1e6]
+    return _response("ready", subjects, selected, crop, method, " ".join(warnings) or None, fitted_aspect)
+
+
+def _group_crop(analysis, subjects, members, preset, aspect):
+    selected = _Group(tuple(members), "all" if len(members) == len(subjects) else "group")
+    if preset == "full-body" and any(s.person is None for s in members):
+        return _response("person_not_detected", subjects, selected,
+                         warning="A whole-person outline was not detected for everyone selected. Your crop is unchanged; try a portrait preset or adjust the group crop manually.", aspect=aspect)
+    frames, bodies, warnings = [], [], []
+    for subject in members:
+        if preset == "full-body" or subject.face is None:
+            # A turned-away member must not disappear from a group portrait.
+            # Include their reliable body outline; never guess their head position.
+            frames.append(_full_body(subject))
+            bodies.append(subject.person)
+        else:
+            frames.append(_portrait(subject, preset))
+    if preset != "full-body" and bodies:
+        warnings.append("Some faces are not clear enough for a portrait crop. Their full visible bodies are included to keep everyone in the frame.")
+    if any(min(d.box[0], d.box[1], 1-d.box[2], 1-d.box[3]) < .02 for d in bodies):
+        warnings.append("Someone touches the photo edge. Review heads, hands and feet; parts outside the original cannot be restored.")
+    return _ready(analysis, subjects, selected, _union(frames), "group", warnings, aspect)
+
+
+def suggest_from_analysis(analysis, preset="tight", subject_id=None, aspect="Free", *, subject_ids=None):
     """Pure framing policy, separated from model inference for regression tests."""
     _validate(preset, aspect)
     if len(analysis.size) != 2 or min(analysis.size) <= 0:
         raise ValueError("Invalid photograph dimensions.")
     subjects = _subjects(analysis.detections)
+    if subject_ids is not None:
+        if subject_id is not None:
+            raise ValueError("Choose a single subject or a list of people, not both.")
+        if not isinstance(subject_ids, list) or not subject_ids or not all(isinstance(i, str) for i in subject_ids):
+            raise ValueError("Select at least one detected person.")
+        if len(set(subject_ids)) != len(subject_ids):
+            raise ValueError("Each selected person must appear only once.")
+        known = {s.id for s in subjects}
+        if any(i not in known for i in subject_ids):
+            raise ValueError("A selected person is no longer available. Preview Smart Crop again.")
+        members = [s for s in subjects if s.id in subject_ids]
+        if len(members) > 1:
+            return _group_crop(analysis, subjects, members, preset, aspect)
+        subject_id = members[0].id
+    if subject_id == "all" and len(subjects) > 1:
+        return _group_crop(analysis, subjects, subjects, preset, aspect)
     if subject_id is not None and not any(s.id == subject_id for s in subjects):
         raise ValueError("That subject is no longer available. Preview Smart Crop again.")
     if not subjects:
@@ -228,23 +304,13 @@ def suggest_from_analysis(analysis, preset="tight", subject_id=None, aspect="Fre
     else:
         box = _portrait(selected, preset)
         method = "face"
-    box, fitted_aspect, warning = _aspect(box, aspect, analysis.size)
-    if warning:
-        warnings.append(warning)
-    width = (box[2]-box[0]) * analysis.size[0]
-    height = (box[3]-box[1]) * analysis.size[1]
-    if min(width, height) < 512 or width*height < 1_000_000:
-        warnings.append("This crop has limited resolution. Check the cropped size before exporting; Fieldroom does not upscale it.")
-    # Round outward so serialization cannot shave off a boundary at the edge.
-    crop = [math.floor(box[0]*1e6)/1e6, math.floor(box[1]*1e6)/1e6,
-            math.ceil(box[2]*1e6)/1e6, math.ceil(box[3]*1e6)/1e6]
-    return _response("ready", subjects, selected, crop, method, " ".join(warnings) or None, fitted_aspect)
+    return _ready(analysis, subjects, selected, box, method, warnings, aspect)
 
 
-def suggest(path, preset="tight", subject_id=None, aspect="Free"):
+def suggest(path, preset="tight", subject_id=None, aspect="Free", *, subject_ids=None):
     _validate(preset, aspect)
     try:
         analysis = analyze(path)
     except ModelUnavailable as exc:
         return _response("model_unavailable", warning=str(exc), aspect=aspect)
-    return suggest_from_analysis(analysis, preset, subject_id, aspect)
+    return suggest_from_analysis(analysis, preset, subject_id, aspect, subject_ids=subject_ids)

@@ -54,6 +54,7 @@ jobs:
           node tests/browser.cjs
           export FIELDROOM_SMARTCROP_IMAGE="$RUNNER_TEMP/fieldroom-model-fixtures/basketball1.png"
           export FIELDROOM_SMARTCROP_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Smart-Crop.png"
+          export FIELDROOM_GROUPCROP_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Group-Crop.png"
           node tests/smartcrop_browser.cjs
       - name: Build and test the portable offline trial
         run: |
@@ -77,5 +78,7 @@ jobs:
         if: always()
         with:
           name: Fieldroom-Smart-Crop-Check
-          path: ${{ runner.temp }}/Fieldroom-Smart-Crop.png
+          path: |
+            ${{ runner.temp }}/Fieldroom-Smart-Crop.png
+            ${{ runner.temp }}/Fieldroom-Group-Crop.png
           if-no-files-found: ignore

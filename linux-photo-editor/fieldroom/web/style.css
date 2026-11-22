@@ -1134,3 +1134,45 @@ body.photo-only #viewport {
 #smartCropNotice {
   margin: 8px 0 0;
 }
+#smartCropSubjectField {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+#smartCropSubjectField legend {
+  padding: 0;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+#smartCropSubjects {
+  max-height: 140px;
+  overflow-y: auto;
+}
+.smart-crop-controls .smart-crop-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 5px 2px;
+  cursor: pointer;
+}
+.smart-crop-person input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.smart-crop-person span {
+  overflow-wrap: anywhere;
+}
+.smart-crop-all {
+  border-bottom: 1px solid var(--line);
+}
+#smartCropSelection {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}

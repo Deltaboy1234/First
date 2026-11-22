@@ -61,7 +61,8 @@ class SmartCropModelTests(unittest.TestCase):
         self.assert_contains_point(portrait["crop"], 88 / 640, 112 / 480)
         self.assertLess(portrait["crop"][2], .35)  # The face is at the far left.
 
-        people = sorted(portrait["subjects"], key=lambda person: person["box"][0])
+        people = sorted((s for s in portrait["subjects"] if s["kind"] != "group"),
+                        key=lambda person: person["box"][0])
         self.assertEqual(len(people), 2)
         left = sc.suggest(path, "full-body", subject_id=people[0]["id"])
         right = sc.suggest(path, "full-body", subject_id=people[1]["id"])
@@ -72,6 +73,23 @@ class SmartCropModelTests(unittest.TestCase):
         self.assertGreater(right["crop"][0], .60)
         self.assert_contains_point(left["crop"], 100 / 640, 460 / 480)
         self.assert_contains_point(right["crop"], 560 / 640, 440 / 480)
+
+    def test_all_people_preserves_both_detected_bodies(self):
+        path = self.folder / "basketball1.png"
+        result = sc.suggest(path, "full-body", subject_id="all", aspect="4:5")
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["method"], "group")
+        self.assertEqual(result["selected_subject"], "all")
+        group = next(s for s in result["subjects"] if s["id"] == "all")
+        self.assertEqual(len(group["member_ids"]), 2)
+        for person in (s for s in result["subjects"] if s["kind"] != "group"):
+            self.assert_contains_point(result["crop"], person["box"][0], person["box"][1])
+            self.assert_contains_point(result["crop"], person["box"][2], person["box"][3])
+        for x, y in ((80, 80), (100, 460), (550, 25), (560, 440)):
+            with self.subTest(point=(x, y)):
+                self.assert_contains_point(result["crop"], x / 640, y / 480)
+        self.assertEqual(result["aspect"], "Free")
+        self.assertTrue(result["warning"])
 
     def test_full_body_keeps_action_pose_extremities(self):
         result = sc.suggest(self.folder / "messi5.jpg", "full-body", aspect="4:5")

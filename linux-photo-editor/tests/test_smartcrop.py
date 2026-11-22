@@ -151,8 +151,9 @@ class SmartCropTests(unittest.TestCase):
                                  ("face", (.09, .17, .18, .32), .97),
                                  ("face", (.72, .24, .83, .40), .98))
         initial = sc.suggest_from_analysis(analysis)
-        self.assertEqual(len(initial["subjects"]), 2)
-        target = min(initial["subjects"], key=lambda s: s["box"][0])
+        people = [s for s in initial["subjects"] if s["kind"] != "group"]
+        self.assertEqual(len(people), 2)
+        target = min(people, key=lambda s: s["box"][0])
         selected = sc.suggest_from_analysis(analysis, subject_id=target["id"])
         self.assertEqual(selected["selected_subject"], target["id"])
         self.assertLess((selected["crop"][0] + selected["crop"][2]) / 2, .30)
@@ -165,7 +166,7 @@ class SmartCropTests(unittest.TestCase):
             ("face", (.30, .16, .48, .36), .97),
             ("face", (.58, .38, .69, .50), .95))
         initial = sc.suggest_from_analysis(analysis)
-        self.assertEqual(len(initial["subjects"]), 2)
+        self.assertEqual(len([s for s in initial["subjects"] if s["kind"] != "group"]), 2)
         second = next(s for s in initial["subjects"] if s["kind"] == "face")
         selected = sc.suggest_from_analysis(analysis, subject_id=second["id"])
         self.assert_contains(selected["crop"], (.58, .38, .69, .50))

@@ -2,6 +2,7 @@
 // Set FIELDROOM_SMARTCROP_IMAGE to OpenCV's public basketball1.png fixture for
 // an additional real-inference / Cancel / Apply / export integration scenario.
 // Optional FIELDROOM_SMARTCROP_SCREENSHOT saves that public-fixture preview.
+// Optional FIELDROOM_GROUPCROP_SCREENSHOT saves the two-person group preview.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -17,9 +18,15 @@ let server, browser;
 const pendingRouteReleases = new Set();
 const subjects = [
   {id:'person-0',label:'Person on left',kind:'person',box:[.1,.1,.5,.9]},
-  {id:'person-1',label:'Person on right',kind:'person',box:[.6,.1,.95,.9]}
+  {id:'person-1',label:'Person on right',kind:'person',box:[.6,.1,.95,.9]},
+  {id:'person-2',label:'Person at centre',kind:'person',box:[.45,.2,.6,.8]},
+  {id:'all',label:'All people (3)',kind:'group',box:[.1,.1,.95,.9],member_ids:['person-0','person-1','person-2']}
 ];
-const result = (crop, extra = {}) => ({status:'ready',crop,subjects,selected_subject:'person-0',aspect:'Free',warning:null,...extra});
+const result = (crop, extra = {}) => {
+  const value = {status:'ready',crop,subjects,selected_subject:'person-0',aspect:'Free',warning:null,...extra};
+  value.selected_subjects ??= value.selected_subject === 'all' ? subjects.filter(s => s.kind !== 'group').map(s => s.id) : [value.selected_subject];
+  return value;
+};
 
 async function run() {
   const fixture = spawnSync(python, ['-c',
@@ -94,9 +101,11 @@ async function run() {
   assert.notEqual(await crop(),before);
   assert.equal(await page.locator('#filmstrip .thumb.dirty').count(),0);
   assert.equal(await page.locator('#smartCropSubjectField').isVisible(),true);
-  await page.locator('#smartCropSubject').selectOption('person-1');
+  await page.locator('#smartCropSubjects input[value="person-0"]').uncheck();
+  await page.locator('#smartCropSubjects input[value="person-1"]').check();
   const second = await waitForRequest(1);
-  assert.equal(second.data.subject_id,'person-1');
+  assert.deepEqual(second.data.subject_ids,['person-1']);
+  assert(!('subject_id' in second.data));
   await second.reply(result([.55,.15,.95,.85],{selected_subject:'person-1'}));
   await ready();
   const chosen = await crop();
@@ -141,8 +150,28 @@ async function run() {
   await page.locator('#applyCrop').click();
   await page.waitForFunction(() => document.getElementById('cropPanel').hidden);
   assert.equal(await page.locator('#filmstrip .thumb.dirty').count(),1);
+
+  await enterCrop();
+  assert.equal(await page.locator('#smartCropSubjects input[type="checkbox"]').count(),3);
+  await page.locator('#smartCropSubjects input[value="person-1"]').check();
+  const subset = await waitForRequest(7);
+  assert.deepEqual(subset.data.subject_ids,['person-0','person-1'],'The real checkbox UI did not request exactly the two selected people.');
+  await subset.reply(result([.1,.1,.95,.85],{selected_subject:'group',selected_subjects:['person-0','person-1'],method:'group'}));
+  await ready();
+  assert(await page.locator('#smartCropSubjects input[value="person-0"]').isChecked());
+  assert(await page.locator('#smartCropSubjects input[value="person-1"]').isChecked());
+  assert.equal(await page.locator('#smartCropSubjects input[value="person-2"]').isChecked(),false);
+  assert.equal(await page.locator('#smartCropAll').isChecked(),false);
+  assert(await page.locator('#smartCropAll').evaluate(node => node.indeterminate));
+  assert.match(await page.locator('#smartCropSelection').innerText(),/2 of 3 selected/);
+  assert.match(await page.locator('#smartCropNotice').innerText(),/2 selected people/);
+  await page.locator('#cancelCrop').click();
+  await page.waitForFunction(() => document.getElementById('cropPanel').hidden);
+  await enterCrop();
+  assert.equal(await crop(),adjusted,'Cancelling a subset preview changed the accepted manual crop.');
+  await page.locator('#cancelCrop').click();
   assert.deepEqual(errors,[]);
-  console.log('Passed browser Smart Crop preview, subject selection, no-subject, cancellation, preset race, manual adjustment and explicit Apply.');
+  console.log('Passed browser Smart Crop preview, exact two-of-three checkbox selection, no-subject, cancellation, preset race, manual adjustment and explicit Apply.');
   await page.close();
   if (process.env.FIELDROOM_SMARTCROP_IMAGE) await realInference(url);
   else console.log('Real-inference browser scenario skipped: FIELDROOM_SMARTCROP_IMAGE is not set.');
@@ -174,15 +203,15 @@ async function realInference(url) {
     await page.locator('#cropTool').click();
     await page.waitForFunction(() => !document.getElementById('suggestCrop').disabled);
   };
-  const detect = async () => {
+  const detect = async ({activate = () => page.locator('#suggestCrop').click(), method = 'face'} = {}) => {
     const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/smart_crop') && response.request().method() === 'POST');
-    await page.locator('#suggestCrop').click();
+    await activate();
     const response = await responsePromise;
     assert(response.ok(), `Smart Crop request failed (${response.status()}).`);
     const suggestion = await response.json();
     await page.waitForFunction(() => !document.getElementById('suggestCrop').disabled);
     assert.equal(suggestion.status,'ready', suggestion.warning || 'Expected a real subject detection.');
-    assert.equal(suggestion.method,'face');
+    assert.equal(suggestion.method,method);
     assert(Array.isArray(suggestion.crop) && suggestion.crop.length === 4);
     return suggestion;
   };
@@ -246,8 +275,61 @@ async function realInference(url) {
   await page.waitForFunction(() => document.getElementById('cropPanel').hidden);
   const croppedExport = await saveAndInspect(accepted.crop);
   assert(croppedExport.export[0]<640 && croppedExport.export[1]<480,'Apply did not produce a cropped export.');
+
+  await enterCrop();
+  const allPeople = page.locator('#smartCropAll');
+  assert.equal(await page.locator('#smartCropSubjects input[type="checkbox"]').count(),2);
+  const groupPortrait = await detect({activate:() => allPeople.check(),method:'group'});
+  assert.equal(groupPortrait.selected_subject,'all');
+  assert(await allPeople.isChecked());
+  assert.match(await page.locator('#smartCropNotice').innerText(),/all 2 detected people/);
+  assert.equal(await page.locator('#filmstrip .thumb.dirty').count(),0,'A group preview changed the accepted individual crop.');
+  const groupBody = await detect({activate:() => page.locator('#smartCropPreset').selectOption('full-body'),method:'group'});
+  assert.equal(groupBody.selected_subject,'all','Changing a preset lost the group selection.');
+  const groupRatio = await detect({activate:() => page.locator('#aspect').selectOption('4:5'),method:'group'});
+  assert.equal(groupRatio.aspect,'Free','An impossible portrait ratio must not cut a person out of the group.');
+  assert(await allPeople.isChecked());
+  const people = groupRatio.subjects.filter(subject => subject.kind !== 'group');
+  assert.equal(people.length,2);
+  const containsEveryone = suggestion => {
+    for (const person of people) {
+      assert(suggestion.crop[0] <= person.box[0] && suggestion.crop[1] <= person.box[1],`Group crop clipped the upper/left extent of ${person.id}.`);
+      assert(suggestion.crop[2] >= person.box[2] && suggestion.crop[3] >= person.box[3],`Group crop clipped the lower/right extent of ${person.id}.`);
+    }
+  };
+  containsEveryone(groupBody);
+  containsEveryone(groupRatio);
+  const individual = await detect({activate:() => page.locator(`#smartCropSubjects input[value="${people[1].id}"]`).uncheck(),method:'person'});
+  assert.equal(individual.selected_subject,people[0].id);
+  assert(individual.crop[2] < .35,'Switching back to an individual did not isolate the left person.');
+  const group = await detect({activate:() => allPeople.check(),method:'group'});
+  containsEveryone(group);
+  assert(await allPeople.isChecked());
+  const groupDrawn = await page.locator('#cropRect').evaluate(node => [
+    parseFloat(node.style.left)/100,parseFloat(node.style.top)/100,
+    (parseFloat(node.style.left)+parseFloat(node.style.width))/100,
+    (parseFloat(node.style.top)+parseFloat(node.style.height))/100
+  ]);
+  group.crop.forEach((value,index) => assert(Math.abs(groupDrawn[index]-value)<1e-6,'The UI did not draw the group crop.'));
+  if (process.env.FIELDROOM_GROUPCROP_SCREENSHOT) {
+    const screenshot = path.resolve(process.env.FIELDROOM_GROUPCROP_SCREENSHOT);
+    fs.mkdirSync(path.dirname(screenshot),{recursive:true});
+    await page.screenshot({path:screenshot});
+  }
+  await page.locator('#cancelCrop').click();
+  await page.waitForFunction(() => document.getElementById('cropPanel').hidden);
+  const afterGroupCancel = JSON.parse(fs.readFileSync(path.join(realRoll,'Edited','.fieldroom.json'),'utf8'));
+  assert.deepEqual(afterGroupCancel.photos[filename].recipe.crop,accepted.crop,'Cancelling the group preview changed the saved individual crop.');
+  await enterCrop();
+  const acceptedGroup = await detect({method:'group'});
+  assert.deepEqual(acceptedGroup.crop,group.crop);
+  await page.locator('#applyCrop').click();
+  await page.waitForFunction(() => document.getElementById('cropPanel').hidden);
+  const groupExport = await saveAndInspect(acceptedGroup.crop);
+  assert(groupExport.export[0] > croppedExport.export[0],'Group export did not widen to include both people.');
   assert.deepEqual(errors,[]);
   console.log(`Passed real offline inference on off-center person, unchanged Cancel export (${cancelledExport.export.join(' × ')}), accepted crop export (${croppedExport.export.join(' × ')}), exact recipe/dimensions and original preservation.`);
+  console.log(`Passed All people selection, group preset persistence, aspect fallback, return to individual, group Cancel and accepted two-person export (${groupExport.export.join(' × ')}).`);
   await page.close();
 }
 run().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {

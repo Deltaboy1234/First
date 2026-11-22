@@ -35,7 +35,10 @@ const smartCrop = {
   loading: false,
   previewActive: false,
   subjects: [],
-  selectedSubject: null
+  selectedSubject: null,
+  selectedSubjects: null,
+  choiceSignature: "",
+  inputs: new Map()
 };
 
 function status(message) {
@@ -849,10 +852,12 @@ function syncSmartCropControls() {
   const available = !!active() && !!viewport.draft && !busy;
   const run = $("suggestCrop");
   if (!run) return;
-  run.disabled = !available || !viewport.box || smartCrop.loading || !!browserTrial;
+  const noSelection = smartCrop.inputs.size > 0 && smartCrop.selectedSubjects?.length === 0;
+  run.disabled = !available || !viewport.box || smartCrop.loading || noSelection || !!browserTrial;
   run.textContent = smartCrop.loading ? "Detecting subject…" : "Preview AI Crop";
   $("smartCropPreset").disabled = !available || !!browserTrial;
-  $("smartCropSubject").disabled = !available || !!browserTrial;
+  $("smartCropAll").disabled = !available || !!browserTrial;
+  for (const input of smartCrop.inputs.values()) input.disabled = !available || !!browserTrial;
   $("cancelDetection").hidden = !smartCrop.loading;
   $("smartCropControls").setAttribute("aria-busy", String(smartCrop.loading));
   $("applyCrop").disabled = !available || !viewport.box || smartCrop.loading;
@@ -869,7 +874,8 @@ function invalidateSmartCrop(message, clearSubjects = false) {
   if (clearSubjects) {
     smartCrop.subjects = [];
     smartCrop.selectedSubject = null;
-    if ($("smartCropSubject")) updateSmartCropSubjects();
+    smartCrop.selectedSubjects = null;
+    if ($("smartCropSubjects")) updateSmartCropSubjects();
   }
   if ($("smartCropNotice") && message !== undefined) {
     $("smartCropNotice").textContent = browserTrial ?
@@ -879,13 +885,60 @@ function invalidateSmartCrop(message, clearSubjects = false) {
 }
 
 function updateSmartCropSubjects() {
-  const select = $("smartCropSubject");
-  select.replaceChildren();
-  for (const subject of smartCrop.subjects) {
-    select.add(new Option(subject.label || "Detected subject", String(subject.id)));
+  const people = smartCrop.subjects.filter(subject => subject.kind !== "group");
+  const list = $("smartCropSubjects");
+  const signature = JSON.stringify(people.map(subject => [String(subject.id), subject.label]));
+  // Reuse the inputs when only the checked state changes, preserving keyboard
+  // focus and rapid selections while earlier preview requests are in flight.
+  if (signature !== smartCrop.choiceSignature) {
+    smartCrop.choiceSignature = signature;
+    smartCrop.inputs.clear();
+    list.replaceChildren();
+    for (const [index, subject] of people.entries()) {
+      const label = document.createElement("label");
+      label.className = "smart-crop-person";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = `smartCropPerson-${index}`;
+      input.value = String(subject.id);
+      input.onchange = () => {
+        const chosen = new Set(smartCrop.selectedSubjects || []);
+        input.checked ? chosen.add(input.value) : chosen.delete(input.value);
+        return changeSmartCropSelection(people.filter(person => chosen.has(String(person.id))).map(person => String(person.id)));
+      };
+      const name = document.createElement("span");
+      name.textContent = subject.label || "Detected person";
+      label.append(input, name);
+      list.append(label);
+      smartCrop.inputs.set(String(subject.id), input);
+    }
   }
-  if (smartCrop.selectedSubject !== null) select.value = String(smartCrop.selectedSubject);
-  $("smartCropSubjectField").hidden = smartCrop.subjects.length < 2;
+  const selected = new Set(smartCrop.selectedSubjects || []);
+  for (const [id, input] of smartCrop.inputs) input.checked = selected.has(id);
+  const count = people.filter(person => selected.has(String(person.id))).length;
+  $("smartCropAll").checked = people.length > 0 && count === people.length;
+  $("smartCropAll").indeterminate = count > 0 && count < people.length;
+  $("smartCropSelection").textContent = count === 0 ? "Choose at least one person." :
+    count === people.length && count > 1 ? `All ${count} detected people selected.` :
+    `${count} of ${people.length} selected.`;
+  $("smartCropSubjectField").hidden = people.length < 2;
+}
+
+function changeSmartCropSelection(ids) {
+  const requestedAspect = $("aspect").value;
+  invalidateSmartCrop();
+  if (ids.length) $("aspect").value = requestedAspect;
+  smartCrop.selectedSubjects = ids;
+  smartCrop.selectedSubject = ids.length === 0 ? null : ids.length === 1 ? ids[0] :
+    ids.length === smartCrop.inputs.size ? "all" : "group";
+  updateSmartCropSubjects();
+  syncSmartCropControls();
+  if (!ids.length) {
+    $("smartCropNotice").textContent = "Choose at least one person to preview an AI crop. Your current crop is unchanged.";
+    status("No people selected. Your current crop is unchanged.");
+    return;
+  }
+  return suggestSmartCrop();
 }
 
 function validCrop(crop) {
@@ -897,6 +950,7 @@ function validCrop(crop) {
 async function suggestSmartCrop() {
   const p = active();
   if (!p || busy || !viewport.box || !viewport.draft || browserTrial) return;
+  if (smartCrop.inputs.size > 0 && smartCrop.selectedSubjects?.length === 0) return;
   smartCrop.controller?.abort();
   const controller = new AbortController();
   const ticket = ++smartCrop.ticket;
@@ -911,12 +965,15 @@ async function suggestSmartCrop() {
     const result = await api("smart_crop", {
       id,
       preset: $("smartCropPreset").value,
-      subject_id: smartCrop.selectedSubject,
+      ...(smartCrop.selectedSubjects?.length ? {subject_ids: [...smartCrop.selectedSubjects]} : {}),
       aspect: $("aspect").value
     }, false, controller.signal);
     if (!current()) return;
     smartCrop.subjects = Array.isArray(result.subjects) ? result.subjects : [];
     smartCrop.selectedSubject = result.selected_subject ?? null;
+    smartCrop.selectedSubjects = Array.isArray(result.selected_subjects) ? result.selected_subjects.map(String) :
+      result.selected_subject === "all" ? smartCrop.subjects.filter(subject => subject.kind !== "group").map(subject => String(subject.id)) :
+      result.selected_subject ? [String(result.selected_subject)] : [];
     updateSmartCropSubjects();
     if (!validCrop(result.crop)) {
       if (result.crop !== null && result.crop !== undefined) throw Error("The crop suggestion was invalid. Your crop is unchanged.");
@@ -932,8 +989,11 @@ async function suggestSmartCrop() {
     $("aspect").value = aspect;
     viewport.drawCrop();
     smartCrop.previewActive = true;
-    notice.textContent = [result.warning, "Review the crop, then choose Apply crop or Cancel. You can also move or resize it."].filter(Boolean).join(" ");
-    status(result.warning || "AI crop preview ready. No edit applied yet.");
+    const groupSize = smartCrop.selectedSubjects.length > 1 ? smartCrop.selectedSubjects.length : 0;
+    const groupNotice = groupSize ? (groupSize === smartCrop.inputs.size ?
+      `Group preview includes all ${groupSize} detected people.` : `Group preview includes ${groupSize} selected people.`) : null;
+    notice.textContent = [groupNotice, result.warning, "Review the crop, then choose Apply crop or Cancel. You can also move or resize it."].filter(Boolean).join(" ");
+    status(result.warning || (groupSize ? "Group crop preview ready. No edit applied yet." : "AI crop preview ready. No edit applied yet."));
   } catch (error) {
     if (!current() || error.name === "AbortError") return;
     $("aspect").value = viewport.aspect;
@@ -961,19 +1021,26 @@ function addSmartCropControls() {
     ["full-body", "Full Body · Head to toe"]
   ]) select.add(new Option(label, value));
   select.value = "tight";
-  const subjectField = document.createElement("div");
+  const subjectField = document.createElement("fieldset");
   subjectField.id = "smartCropSubjectField";
   subjectField.hidden = true;
-  const subjectLabel = document.createElement("label");
-  subjectLabel.htmlFor = "smartCropSubject";
-  subjectLabel.textContent = "Choose the subject";
-  const subjectSelect = document.createElement("select");
-  subjectSelect.id = "smartCropSubject";
-  subjectSelect.onchange = () => {
-    smartCrop.selectedSubject = subjectSelect.value;
-    return suggestSmartCrop();
-  };
-  subjectField.append(subjectLabel, subjectSelect);
+  const subjectLabel = document.createElement("legend");
+  subjectLabel.textContent = "Include in crop";
+  const allLabel = document.createElement("label");
+  allLabel.className = "smart-crop-person smart-crop-all";
+  const allInput = document.createElement("input");
+  allInput.type = "checkbox";
+  allInput.id = "smartCropAll";
+  allInput.onchange = () => changeSmartCropSelection(allInput.checked ? [...smartCrop.inputs.keys()] : []);
+  const allText = document.createElement("span");
+  allText.textContent = "All people";
+  allLabel.append(allInput, allText);
+  const subjectList = document.createElement("div");
+  subjectList.id = "smartCropSubjects";
+  const selection = document.createElement("p");
+  selection.id = "smartCropSelection";
+  selection.setAttribute("aria-live", "polite");
+  subjectField.append(subjectLabel, allLabel, subjectList, selection);
   const run = document.createElement("button");
   run.id = "suggestCrop";
   run.textContent = "Preview AI Crop";
@@ -1014,11 +1081,11 @@ document.addEventListener("keydown", e => {
   if (busy || document.querySelector("dialog[open]") || !defaults) return;
   const modifier = e.ctrlKey || e.metaKey,
     k = e.key.toLowerCase(),
-    typing = e.target.matches("textarea,input:not([type=range]),[contenteditable=true]");
+    typing = e.target.matches("textarea,input:not([type=range]):not([type=checkbox]),[contenteditable=true]");
   if (typing) return;
   // Let keyboard activation reach the focused control. In particular, Enter on
   // Preview AI Crop must run detection, not accept the existing draft first.
-  if (!modifier && e.target.matches("button,select") && ["enter", " "].includes(k)) return;
+  if (!modifier && e.target.matches("button,select,input[type=checkbox]") && ["enter", " "].includes(k)) return;
   if (e.target.tagName === "SELECT" && k === "escape") return;
   if (modifier && k === "o") {
     e.preventDefault();

@@ -38,7 +38,15 @@ function harness({trial = false} = {}) {
     scrollIntoView() {}
     setPointerCapture() {}
     hasPointerCapture() { return false; }
-    matches(selector) { return selector.split(',').some(tag => tag.trim().toUpperCase() === this.tagName); }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const tag = part.trim();
+        if (tag === 'input[type=checkbox]') return this.tagName === 'INPUT' && this.type === 'checkbox';
+        if (tag.startsWith('input:not(')) return this.tagName === 'INPUT' && this.type !== 'range' &&
+          (!tag.includes('[type=checkbox]') || this.type !== 'checkbox');
+        return tag.toUpperCase() === this.tagName;
+      });
+    }
     closest() { return null; }
     getBoundingClientRect() { return {left: 0, top: 0, width: this.clientWidth, height: this.clientHeight}; }
     getContext() { return new Proxy({}, {get: () => () => {}}); }
@@ -102,8 +110,29 @@ function harness({trial = false} = {}) {
   return {test: context.test, nodes, requests, handlers};
 }
 const plain = value => JSON.parse(JSON.stringify(value));
-const ready = (crop, extra = {}) => ({status:"ready",crop,aspect:"Free",subjects:[{id:"person-0",label:"Person on left",kind:"person",box:[.1,.1,.5,.9]}],selected_subject:"person-0",warning:null,...extra});
+const ready = (crop, extra = {}) => {
+  const result = {status:"ready",crop,aspect:"Free",subjects:[{id:"person-0",label:"Person on left",kind:"person",box:[.1,.1,.5,.9]}],selected_subject:"person-0",warning:null,...extra};
+  result.selected_subjects ??= result.selected_subject === "all" ? result.subjects.filter(s => s.kind !== "group").map(s => s.id) :
+    result.selected_subject ? [result.selected_subject] : [];
+  return result;
+};
+const groupSubjects = [
+  {id:"person-0",label:"Person 1 (left)",kind:"person",box:[.1,.1,.4,.9]},
+  {id:"person-1",label:"Person 2 (right)",kind:"person",box:[.6,.1,.9,.9]},
+  {id:"all",label:"All people (2)",kind:"group",box:[.1,.1,.9,.9],member_ids:["person-0","person-1"]}
+];
 const deferred = h => h.requests.filter(r => r.url === "/api/smart_crop").at(-1);
+const togglePerson = (h, id, checked) => {
+  const input = h.test.smartCrop.inputs.get(id);
+  assert(input, `Missing checkbox for ${id}`);
+  input.checked = checked;
+  return input.onchange();
+};
+const toggleAll = (h, checked = true) => {
+  const input = h.nodes.get("smartCropAll");
+  input.checked = checked;
+  return input.onchange();
+};
 
 async function run() {
   let passed = 0;
@@ -164,23 +193,126 @@ async function run() {
     assert.deepEqual(plain(h.test.viewport.draft),[.1,.1,.9,.9]);
     assert.match(h.nodes.get("smartCropNotice").textContent,/invalid/);
   });
-  await check("subject choice and requested aspect are sent to backend", async () => {
+  await check("individual checkbox choice and aspect are sent to backend", async () => {
     const h = harness(), first = h.test.suggestSmartCrop();
-    deferred(h).complete(ready([.1,.1,.4,.8],{subjects:[{id:"person-0",label:"Left"},{id:"person-1",label:"Right"}]})); await first;
+    deferred(h).complete(ready([.1,.1,.4,.8],{subjects:groupSubjects})); await first;
     assert(!h.nodes.get("smartCropSubjectField").hidden);
-    h.nodes.get("smartCropSubject").value="person-1";
-    const second = h.nodes.get("smartCropSubject").onchange();
-    assert.equal(deferred(h).data.subject_id,"person-1");
-    deferred(h).complete(ready([.6,.1,.9,.8],{selected_subject:"person-1"})); await second;
+    togglePerson(h,"person-0",false);
+    const second = togglePerson(h,"person-1",true);
+    assert.deepEqual(deferred(h).data.subject_ids,["person-1"]);
+    assert(!("subject_id" in deferred(h).data));
+    deferred(h).complete(ready([.6,.1,.9,.8],{subjects:groupSubjects,selected_subject:"person-1"})); await second;
     assert.deepEqual(plain(h.test.viewport.draft),[.6,.1,.9,.8]);
     h.nodes.get("aspect").value="4:5";
     h.nodes.get("aspect").onchange({target:h.nodes.get("aspect")});
     const req = deferred(h);
-    assert.equal(req.data.aspect,"4:5"); assert.equal(req.data.subject_id,"person-1");
-    req.complete(ready([.5,.1,.95,.8],{selected_subject:"person-1",aspect:"4:5"}));
+    assert.equal(req.data.aspect,"4:5"); assert.deepEqual(req.data.subject_ids,["person-1"]);
+    req.complete(ready([.5,.1,.95,.8],{subjects:groupSubjects,selected_subject:"person-1",aspect:"4:5"}));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(h.test.viewport.aspect,"4:5");
     assert.equal(h.nodes.get("aspect").value,"4:5");
+  });
+  await check("All people checkbox frames the group and persists across presets", async () => {
+    const h = harness(), initial = h.test.suggestSmartCrop();
+    deferred(h).complete(ready([.1,.1,.4,.7],{subjects:groupSubjects})); await initial;
+    assert.equal(h.test.smartCrop.inputs.size,2,"Synthetic group must not become a person checkbox");
+    assert(h.nodes.get("smartCropAll").indeterminate);
+    const group = toggleAll(h);
+    assert.deepEqual(deferred(h).data.subject_ids,["person-0","person-1"]);
+    deferred(h).complete(ready([.05,.1,.95,.8],{subjects:groupSubjects,selected_subject:"all",method:"group"})); await group;
+    assert(h.nodes.get("smartCropAll").checked);
+    assert(!h.nodes.get("smartCropAll").indeterminate);
+    assert.deepEqual(plain(h.test.active().recipe.crop),[0,0,1,1]);
+    assert.match(h.nodes.get("smartCropNotice").textContent,/all 2 detected people/);
+    h.nodes.get("smartCropPreset").value="full-body";
+    const fullBody = h.nodes.get("smartCropPreset").onchange();
+    assert.deepEqual(deferred(h).data.subject_ids,["person-0","person-1"]);
+    assert.equal(deferred(h).data.preset,"full-body");
+    deferred(h).complete(ready([.05,.05,.95,.95],{subjects:groupSubjects,selected_subject:"all",method:"group"})); await fullBody;
+    assert(h.nodes.get("smartCropAll").checked);
+    assert.deepEqual(plain(h.test.viewport.draft),[.05,.05,.95,.95]);
+    h.test.finishCrop(true);
+    assert.deepEqual(plain(h.test.active().recipe.crop),[.05,.05,.95,.95]);
+  });
+  await check("two of three people remain selected through rapid out-of-order replies", async () => {
+    const subjects = [
+      ...groupSubjects.slice(0,2),
+      {id:"person-2",label:"Person 3 (far right)",kind:"person",box:[.92,.1,.99,.9]},
+      {...groupSubjects[2],label:"All people (3)",member_ids:["person-0","person-1","person-2"]}
+    ];
+    const h = harness(), initial = h.test.suggestSmartCrop();
+    deferred(h).complete(ready([.1,.1,.4,.7],{subjects})); await initial;
+    const all = toggleAll(h), old = deferred(h);
+    const subset = togglePerson(h,"person-2",false), latest = deferred(h);
+    assert(old.signal.aborted);
+    assert.deepEqual(latest.data.subject_ids,["person-0","person-1"]);
+    latest.complete(ready([.05,.1,.95,.8],{subjects,selected_subject:"group",selected_subjects:["person-0","person-1"],method:"group"})); await subset;
+    old.complete(ready([0,0,1,1],{subjects,selected_subject:"all",method:"group"})); await all;
+    assert.deepEqual(plain(h.test.smartCrop.selectedSubjects),["person-0","person-1"]);
+    assert(h.test.smartCrop.inputs.get("person-0").checked);
+    assert(h.test.smartCrop.inputs.get("person-1").checked);
+    assert(!h.test.smartCrop.inputs.get("person-2").checked);
+    assert(!h.nodes.get("smartCropAll").checked);
+    assert(h.nodes.get("smartCropAll").indeterminate);
+    assert.match(h.nodes.get("smartCropNotice").textContent,/2 selected people/);
+    assert.deepEqual(plain(h.test.viewport.draft),[.05,.1,.95,.8]);
+  });
+  await check("changing checked people retains an aspect request still in flight", async () => {
+    const h = harness(), initial = h.test.suggestSmartCrop();
+    deferred(h).complete(ready([.1,.1,.4,.7],{subjects:groupSubjects})); await initial;
+    h.nodes.get("aspect").value="4:5";
+    const aspect = h.nodes.get("aspect").onchange({target:h.nodes.get("aspect")}), old = deferred(h);
+    const group = togglePerson(h,"person-1",true), latest = deferred(h);
+    assert(old.signal.aborted);
+    assert.equal(latest.data.aspect,"4:5");
+    assert.deepEqual(latest.data.subject_ids,["person-0","person-1"]);
+    latest.complete(ready([.1,.1,.9,.9],{subjects:groupSubjects,selected_subject:"all",method:"group",aspect:"4:5"})); await group;
+    old.complete(ready([.1,.1,.5,.7],{subjects:groupSubjects,aspect:"4:5"})); await aspect;
+    assert.equal(h.nodes.get("aspect").value,"4:5");
+    assert.equal(h.test.viewport.aspect,"4:5");
+  });
+  await check("unchecking every person cancels pending detection and keeps the crop", async () => {
+    const h = harness(), initial = h.test.suggestSmartCrop();
+    deferred(h).complete(ready([.1,.1,.4,.7],{subjects:groupSubjects})); await initial;
+    const group = toggleAll(h), old = deferred(h);
+    const count = h.requests.length;
+    toggleAll(h,false);
+    assert(old.signal.aborted);
+    assert.equal(h.requests.length,count,"An empty selection must not request automatic subject selection");
+    assert(h.nodes.get("suggestCrop").disabled);
+    assert.match(h.nodes.get("smartCropNotice").textContent,/Choose at least one person/);
+    old.complete(ready([.05,.05,.95,.95],{subjects:groupSubjects,selected_subject:"all",method:"group"})); await group;
+    assert.deepEqual(plain(h.test.smartCrop.selectedSubjects),[]);
+    assert.deepEqual(plain(h.test.viewport.draft),[.1,.1,.4,.7]);
+    const next = togglePerson(h,"person-1",true);
+    assert.deepEqual(deferred(h).data.subject_ids,["person-1"]);
+    deferred(h).complete(ready([.6,.1,.9,.7],{subjects:groupSubjects,selected_subject:"person-1"})); await next;
+    assert(!h.nodes.get("suggestCrop").disabled);
+  });
+  await check("switching from all people to one ignores the late group result", async () => {
+    const h = harness(), initial = h.test.suggestSmartCrop();
+    deferred(h).complete(ready([.1,.1,.4,.7],{subjects:groupSubjects})); await initial;
+    const group = toggleAll(h), old = deferred(h);
+    const person = togglePerson(h,"person-0",false), latest = deferred(h);
+    assert(old.signal.aborted);
+    assert.deepEqual(latest.data.subject_ids,["person-1"]);
+    latest.complete(ready([.6,.1,.9,.7],{subjects:groupSubjects,selected_subject:"person-1"})); await person;
+    old.complete(ready([.05,.05,.95,.95],{subjects:groupSubjects,selected_subject:"all",method:"group"})); await group;
+    assert(!h.test.smartCrop.inputs.get("person-0").checked);
+    assert(h.test.smartCrop.inputs.get("person-1").checked);
+    assert.deepEqual(plain(h.test.viewport.draft),[.6,.1,.9,.7]);
+    assert.deepEqual(plain(h.test.active().recipe.crop),[0,0,1,1]);
+  });
+  await check("Cancel preserves the accepted crop while a group result is pending", async () => {
+    const h = harness(), initial = h.test.suggestSmartCrop();
+    deferred(h).complete(ready([.1,.1,.4,.7],{subjects:groupSubjects})); await initial;
+    h.test.finishCrop(true);
+    h.test.loaded(); h.test.startCrop(); h.test.loaded();
+    const group = toggleAll(h), request = deferred(h);
+    h.test.finishCrop(false);
+    request.complete(ready([.05,.05,.95,.95],{subjects:groupSubjects,selected_subject:"all",method:"group"})); await group;
+    assert.equal(h.test.viewport.draft,null);
+    assert.deepEqual(plain(h.test.active().recipe.crop),[.1,.1,.4,.7]);
   });
   await check("backend Free fallback is shown when ratio would clip subject", async () => {
     const h = harness(); h.nodes.get("aspect").value="4:5";
@@ -259,7 +391,7 @@ async function run() {
   });
   await check("Enter and Space activate focused controls instead of accepting crop", async () => {
     const h = harness();
-    for (const id of ["suggestCrop","smartCropPreset","smartCropSubject"])
+    for (const id of ["suggestCrop","smartCropPreset","smartCropAll"])
       for (const key of ["Enter"," "]) {
         let prevented = false;
         h.handlers.get("keydown")({key,target:h.nodes.get(id),preventDefault() {prevented=true;}});
