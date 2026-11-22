@@ -47,3 +47,21 @@ jobs:
             "$RUNNER_TEMP/fieldroom-test/node_modules/.bin/playwright" install chromium
           fi
           node tests/browser.cjs
+      - name: Build and test the portable offline trial
+        run: |
+          export FIELDROOM_PYTHON="$HOME/.local/share/fieldroom/venv/bin/python"
+          export NODE_PATH="$RUNNER_TEMP/fieldroom-test/node_modules"
+          if command -v google-chrome >/dev/null; then
+            export FIELDROOM_BROWSER="$(command -v google-chrome)"
+          fi
+          "$FIELDROOM_PYTHON" browser-trial/build.py "$RUNNER_TEMP/Fieldroom-Browser-Trial.html"
+          node tests/browser_trial.cjs "$RUNNER_TEMP/Fieldroom-Browser-Trial.html"
+          curl --fail --silent --show-error --location --retry 2 \
+            "https://raw.githubusercontent.com/f-spot/raw-samples/54425e2cd53ec17d5fd88ee3277d03f54bf1fe84/DNG/RAW_LEICA_M8.DNG" \
+            -o "$RUNNER_TEMP/Leica-M8.dng"
+          test "$(git hash-object "$RUNNER_TEMP/Leica-M8.dng")" = "aef6a299e5857877f5e45f566c5e193c6329c0a8"
+          node tests/browser_raw.cjs "$RUNNER_TEMP/Fieldroom-Browser-Trial.html" "$RUNNER_TEMP/Leica-M8.dng" "$RUNNER_TEMP/iss030e122639.NEF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fieldroom-Browser-Trial
+          path: ${{ runner.temp }}/Fieldroom-Browser-Trial.html

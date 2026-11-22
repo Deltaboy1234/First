@@ -2,7 +2,7 @@
 setlocal
 pushd "%~dp0"
 if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -c "import PIL, numpy" >nul 2>&1
+    ".venv\Scripts\python.exe" -c "import PIL, numpy, rawpy" >nul 2>&1
     if errorlevel 1 goto :repair
     ".venv\Scripts\python.exe" app.py %*
     goto :done
@@ -18,7 +18,7 @@ if defined FIELDROOM_PY goto :bundled
 for /f "usebackq delims=" %%P in (`powershell.exe -NoProfile -Command "$pkg = Get-AppxPackage -Name 'OpenAI.CodexPrimaryRuntime*' | Sort-Object Version -Descending | Select-Object -First 1; if ($pkg) { $p=Join-Path $pkg.InstallLocation 'dependencies\python\python.exe'; if (Test-Path -LiteralPath $p) { $p } }"`) do set "FIELDROOM_PY=%%P"
 :bundled
 if defined FIELDROOM_PY (
-    "%FIELDROOM_PY%" app.py %*
+    "%FIELDROOM_PY%" -m fieldroom.windows_trial %*
     goto :done
 )
 py -3 -c "import sys; sys.exit(sys.version_info < (3,10))" >nul 2>&1
@@ -34,6 +34,7 @@ if errorlevel 1 goto :done
 ".venv\Scripts\python.exe" -m pip install .
 if errorlevel 1 goto :done
 ".venv\Scripts\python.exe" app.py %*
+goto :done
 :done
 set "FIELDROOM_EXIT=%ERRORLEVEL%"
 if not "%FIELDROOM_EXIT%"=="0" pause

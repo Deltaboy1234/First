@@ -2,6 +2,14 @@
 
 Fieldroom opens a folder of photos in a Classic Develop workspace. The left panel holds the folder browser and Navigator. The filmstrip runs along the bottom. Basic adjustments, noise reduction and sharpening sit on the right. Image processing runs on your computer and the interface opens in your desktop browser.
 
+## Try it in a browser first
+
+The portable **Fieldroom-Browser-Trial.html** opens directly in a current desktop browser. Download the **Fieldroom-Browser-Trial** artifact from a successful [Fieldroom Linux test](https://github.com/Deltaboy1234/First/actions/workflows/fieldroom-linux.yml) and extract the HTML file. Drop in a **DNG**, **NEF** or **JPEG**, or start with the three sample photographs. The trial uses the same zoom, Navigator, filmstrip and crop controls as the desktop editor.
+
+In the browser trial, **Delete** removes a photo from the current selection. **Save All → Download ZIP** downloads full-size edited JPEGs. **File information** identifies each successful sensor decode. If a camera's compression cannot be decoded and the file contains a usable JPEG preview, the trial labels it **Embedded preview only** and reports that file separately at export. The desktop edition adds disk folders, recoverable deletion and persistent edit settings. The browser trial uses its own image adjustments and keeps your selected files in the tab.
+
+To rebuild the portable trial from source, run `python3 browser-trial/build.py Fieldroom-Browser-Trial.html` with Pillow installed. It bundles three scikit-image samples and a single-threaded, hash-verified WebAssembly build of **LibRaw dcraw_emu**. One background worker develops a RAW at a time. The resulting HTML works offline. The decoder notice and source are under **Open photos → RAW decoder credits**. [Matching LibRaw source and build system](https://github.com/radiantlab/LibRaw/tree/c9d6743ab87feb7cbe970675099cb64ee9abda19)
+
 ## Install and start
 
 From a Linux desktop with Python 3.10 or newer, Git and Python's venv module, run:
@@ -17,7 +25,7 @@ The first install downloads Pillow, NumPy and rawpy. The installer creates a per
 
 You can also download the repository ZIP while signed in to GitHub, extract it and run `bash install.sh` from its `linux-photo-editor` folder. Launch Fieldroom without a folder to try six disposable sample photos. To open a specific folder, run `"$HOME/.local/bin/fieldroom" "/path/to/photos"`. **Open folder** accepts a pasted path and lists mounted drives.
 
-On Windows, double-click **Test-Fieldroom.cmd** for a trial. It uses an available Python environment, including the Codex photo libraries when present. A Python environment with Pillow and NumPy can test raster images. Camera RAW requires rawpy. With the standard Python launcher, the script can create a project-local virtual environment for the full editor.
+On Windows, double-click **Test-Fieldroom.cmd** for a trial. It uses an available Python environment, including the Codex photo libraries when present. If that runtime lacks rawpy, the launcher installs the RAW decoder for your account on the first run. With the standard Python launcher, it can create a project-local virtual environment for the full editor.
 
 ## Inspect focus and noise
 

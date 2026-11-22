@@ -3,7 +3,8 @@ import {
 } from "./viewport.js";
 
 const $ = id => document.getElementById(id);
-const apiKey = location.hash.slice(1) || sessionStorage.getItem("fieldroom-key") || "";
+const browserTrial = globalThis.fieldroomTrial;
+const apiKey = browserTrial ? "" : location.hash.slice(1) || sessionStorage.getItem("fieldroom-key") || "";
 if (apiKey) {
   sessionStorage.setItem("fieldroom-key", apiKey);
   history.replaceState(null, "", location.pathname);
@@ -60,6 +61,7 @@ function icon(name) {
   return svg;
 }
 async function api(route, data = {}, binary = false) {
+  if (browserTrial) return browserTrial.request(route, data);
   const response = await fetch("/api/" + route, {
     method: "POST",
     headers: {
@@ -224,7 +226,7 @@ function drawHist(channels) {
 }
 
 function remember() {
-  if (!folder) return;
+  if (!folder || browserTrial) return;
   try {
     sessionStorage.setItem("fieldroom-session", JSON.stringify({
       path: folder.path,
@@ -295,6 +297,7 @@ async function drainPreview() {
     viewport.setSource(active(), job.recipe, data);
     $("infoSize").textContent = `${data.size[0].toLocaleString()} × ${data.size[1].toLocaleString()} px`;
     $("infoCamera").textContent = data.metadata.camera || "";
+    $("infoCamera").title = data.metadata.rawError || "";
     $("infoCapture").textContent = [data.metadata.iso, data.metadata.aperture, data.metadata.shutter, data
       .metadata.lens
     ].filter(Boolean).join(" · ");
@@ -482,7 +485,7 @@ function selectPhoto(id, force = false) {
   selected = id || null;
   const p = active(),
     b = thumbButtons.get(selected);
-  viewport.clear(p ? "Opening photo…" : "This folder has no supported photos.");
+  viewport.clear(p ? (/\.(nef|dng)$/i.test(p.name) ? "Developing " + p.name + "…" : "Opening photo…") : "This folder has no supported photos.");
   if (b) {
     b.setAttribute("aria-selected", "true");
     b.scrollIntoView({
@@ -588,7 +591,7 @@ async function trash() {
     redrawFolders();
     buildStrip();
     selectPhoto(folder.photos[Math.min(idx, folder.photos.length - 1)]?.id, true);
-    status(`${p.name} moved to Fieldroom Trash.`);
+    status(browserTrial ? `${p.name} removed from this trial. Undo delete restores it.` : `${p.name} moved to Fieldroom Trash.`);
   } catch (error) {
     fail(error);
   } finally {
@@ -631,6 +634,7 @@ async function saveAll() {
   const errors = [],
     outputs = new Set();
   try {
+    browserTrial?.startExport();
     for (const p of jobs.values()) {
       $("saveAll").querySelector("span").textContent = `Saving ${++index}/${jobs.size}`;
       status(`Saving ${p.name}…`);
@@ -650,13 +654,14 @@ async function saveAll() {
       }
     }
     const msg =
+      browserTrial ? `${saved} edited JPEG${saved === 1 ? "" : "s"} ready to download${errors.length ? " · " + errors.length + " failed" : ""}` :
       `${saved} saved · ${skipped} already current${errors.length?" · "+errors.length+" failed":""}`;
     const report = $("saveReport");
     report.replaceChildren();
     const text = document.createElement("p");
     text.textContent = msg;
     report.append(text);
-    for (const path of outputs) {
+    for (const path of browserTrial ? [] : outputs) {
       const d = document.createElement("p");
       d.textContent = path;
       report.append(d);
@@ -671,7 +676,11 @@ async function saveAll() {
       report.append(ul);
     }
     folderToShow = [...outputs].find(path => path.startsWith(folder.path)) || [...outputs][0];
-    $("viewEdited").hidden = !folderToShow;
+    if (browserTrial && saved) {
+      browserTrial.finishExport();
+      $("viewEdited").textContent = "Download ZIP";
+    }
+    $("viewEdited").hidden = browserTrial ? !saved : !folderToShow;
     const updated = await api("folder", {
       path: folder.path
     }).catch(() => null);
@@ -714,6 +723,7 @@ async function browseTo(path) {
 
 function showFolders() {
   if (busy) return;
+  if (browserTrial) return browserTrial.showFiles();
   const dialog = $("folderDialog");
   if (!dialog.open) dialog.showModal();
   browseTo(folder?.path || places[0]?.path);
@@ -765,6 +775,10 @@ $("chooseFolder").onclick = async () => {
   }
 };
 $("viewEdited").onclick = () => {
+  if (browserTrial) {
+    browserTrial.download();
+    return;
+  }
   $("resultsDialog").close();
   if (folderToShow) openFolder(folderToShow);
 };
@@ -867,7 +881,7 @@ async function boot() {
   }
   let saved = null;
   try {
-    saved = JSON.parse(sessionStorage.getItem("fieldroom-session") || "null");
+    if (!browserTrial) saved = JSON.parse(sessionStorage.getItem("fieldroom-session") || "null");
   } catch {}
   if (saved?.changes)
     for (const p of saved.changes) records.set(p.id, p);
@@ -880,7 +894,8 @@ async function boot() {
     } catch {}
   }
   applyFolder(start, saved?.id);
-  if (!rawAvailable) status("JPEG/TIFF mode · install the RAW package to develop camera RAW files.");
+  if (browserTrial) browserTrial.ready(openFolder, status);
+  else if (!rawAvailable) status("JPEG/TIFF mode · install the RAW package to develop camera RAW files.");
 }
 boot().catch(error => {
   viewport.clear(error.message);
