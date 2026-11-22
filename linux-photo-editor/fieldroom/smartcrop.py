@@ -58,6 +58,11 @@ def suggest(path, preset="tight"):
     face = max(faces, key=lambda b: b[2] * b[3] - .08 * ((b[0] + b[2]/2 - width/2)**2 +
                                                          (b[1] + b[3]/2 - height/2)**2))
     x, y, w, h = map(float, face)
+    # Tiny false-positive faces are common in busy scenes and side/downward poses.
+    # Never suggest a destructive-looking tiny crop from an uncertain detection.
+    if w < width * .065 or h < height * .065:
+        return {"crop": [0, 0, 1, 1], "method": "uncertain", "subjects": len(faces),
+                "warning": "Face detection is uncertain. Adjust manually; no automatic crop suggested."}
     factor = PRESETS[preset]
     # Expand downwards for shoulder/torso framing, with extra headroom.
     target_w = w * factor
