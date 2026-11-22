@@ -773,6 +773,8 @@ kbd {
   align-items: stretch;
   gap: 6px;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #5b5d60 transparent;
   flex: 1;
@@ -1161,7 +1163,6 @@ body.photo-only #viewport {
   gap: 8px;
   margin: 0;
   padding: 5px 2px;
-  cursor: pointer;
 }
 .smart-crop-person input {
   flex: 0 0 auto;
@@ -1169,14 +1170,35 @@ body.photo-only #viewport {
   height: 15px;
   margin: 0;
   accent-color: var(--accent);
+  cursor: pointer;
 }
 .smart-crop-person span {
   overflow-wrap: anywhere;
 }
+.smart-crop-controls .smart-crop-name {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  padding: 2px 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.smart-crop-controls .smart-crop-name:hover:not(:disabled) {
+  background: var(--panel2);
+  color: var(--text);
+}
 .smart-crop-all {
   border-bottom: 1px solid var(--line);
+  cursor: pointer;
 }
-#smartCropSelection {
+#smartCropSelection,
+#smartCropHint {
   margin: 5px 0 0;
   font-size: 11px;
   color: var(--muted);

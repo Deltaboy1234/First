@@ -57,14 +57,14 @@ function harness({trial = false} = {}) {
   for (const aspect of ["Free", "Original", "1:1", "3:2", "2:3", "4:5", "5:4", "16:9"])
     nodes.get("aspect").add({value: aspect});
   nodes.get("aspect").value = "Free";
-  const body = new Element(), workspace = new Element(), photoActions = new Element();
+  const body = new Element(), workspace = new Element(), photoActions = new Element(), film = new Element();
   const document = {
     body,
     getElementById: id => nodes.get(id) || null,
     createElement: tag => new Element(tag),
     createElementNS: (_, tag) => new Element(tag),
     createDocumentFragment: () => new Element(),
-    querySelector: selector => selector === ".workspace" ? workspace : selector === ".photo-actions" ? photoActions : null,
+    querySelector: selector => selector === ".workspace" ? workspace : selector === ".photo-actions" ? photoActions : selector === ".film" ? film : null,
     querySelectorAll: () => [],
     addEventListener: (name, callback) => handlers.set(name, callback)
   };
@@ -289,11 +289,13 @@ async function run() {
     deferred(h).complete(ready([.6,.1,.9,.7],{subjects:groupSubjects,selected_subject:"person-1"})); await next;
     assert(!h.nodes.get("suggestCrop").disabled);
   });
-  await check("switching from all people to one ignores the late group result", async () => {
+  await check("clicking a person's name replaces the group and ignores its late result", async () => {
     const h = harness(), initial = h.test.suggestSmartCrop();
     deferred(h).complete(ready([.1,.1,.4,.7],{subjects:groupSubjects})); await initial;
     const group = toggleAll(h), old = deferred(h);
-    const person = togglePerson(h,"person-0",false), latest = deferred(h);
+    const name = h.test.smartCrop.soloButtons.get("person-1");
+    assert(!name.disabled,"Names stay available while a group preview is in flight");
+    const person = name.onclick(), latest = deferred(h);
     assert(old.signal.aborted);
     assert.deepEqual(latest.data.subject_ids,["person-1"]);
     latest.complete(ready([.6,.1,.9,.7],{subjects:groupSubjects,selected_subject:"person-1"})); await person;
@@ -390,8 +392,9 @@ async function run() {
     assert.deepEqual(plain(h.test.active().recipe.crop),[0,0,1,1]);
   });
   await check("Enter and Space activate focused controls instead of accepting crop", async () => {
-    const h = harness();
-    for (const id of ["suggestCrop","smartCropPreset","smartCropAll"])
+    const h = harness(), initial = h.test.suggestSmartCrop();
+    deferred(h).complete(ready([.1,.1,.9,.9],{subjects:groupSubjects})); await initial;
+    for (const id of ["suggestCrop","smartCropPreset","smartCropAll","smartCropName-0","smartCropPerson-0"])
       for (const key of ["Enter"," "]) {
         let prevented = false;
         h.handlers.get("keydown")({key,target:h.nodes.get(id),preventDefault() {prevented=true;}});

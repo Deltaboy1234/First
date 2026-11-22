@@ -165,13 +165,60 @@ async function run() {
   assert(await page.locator('#smartCropAll').evaluate(node => node.indeterminate));
   assert.match(await page.locator('#smartCropSelection').innerText(),/2 of 3 selected/);
   assert.match(await page.locator('#smartCropNotice').innerText(),/2 selected people/);
+
+  // A name is a quick solo selection, even when that person is already checked
+  // as part of a group. The checkbox continues to add/remove just its person.
+  const leftName = page.getByRole('button',{name:'Select only Person on left',exact:true});
+  const rightName = page.getByRole('button',{name:'Select only Person on right',exact:true});
+  await leftName.click();
+  const soloLeft = await waitForRequest(8);
+  assert.deepEqual(soloLeft.data.subject_ids,['person-0'],'Clicking an included name must replace the group with that person.');
+  await soloLeft.reply(result([.15,.1,.5,.85]));
+  await ready();
+  assert(await page.locator('#smartCropSubjects input[value="person-0"]').isChecked());
+  assert.equal(await page.locator('#smartCropSubjects input[value="person-1"]').isChecked(),false);
+  assert.equal(await page.locator('#smartCropSubjects input[value="person-2"]').isChecked(),false);
+  assert.match(await page.locator('#smartCropSelection').innerText(),/1 of 3 selected/);
+
+  await rightName.click();
+  const soloRight = await waitForRequest(9);
+  assert.deepEqual(soloRight.data.subject_ids,['person-1'],'Clicking another name must switch the sole selected person.');
+  await soloRight.reply(result([.55,.15,.95,.85],{selected_subject:'person-1'}));
+  await ready();
+  assert.equal(await page.locator('#smartCropSubjects input[value="person-0"]').isChecked(),false);
+  assert(await page.locator('#smartCropSubjects input[value="person-1"]').isChecked());
+
+  await page.locator('#smartCropSubjects input[value="person-0"]').check();
+  const addPerson = await waitForRequest(10);
+  assert.deepEqual(addPerson.data.subject_ids,['person-0','person-1'],'Checkboxes must add to the current selection.');
+  await addPerson.reply(result([.1,.1,.95,.85],{selected_subject:'group',selected_subjects:['person-0','person-1'],method:'group'}));
+  await ready();
+  await page.locator('#smartCropSubjects input[value="person-1"]').uncheck();
+  const removePerson = await waitForRequest(11);
+  assert.deepEqual(removePerson.data.subject_ids,['person-0'],'Unchecking one person must preserve the other selected people.');
+  await removePerson.reply(result([.15,.1,.5,.85]));
+  await ready();
+
+  await rightName.focus();
+  await page.keyboard.press('Enter');
+  const keyboardRight = await waitForRequest(12);
+  assert.deepEqual(keyboardRight.data.subject_ids,['person-1']);
+  await keyboardRight.reply(result([.55,.15,.95,.85],{selected_subject:'person-1'}));
+  await ready();
+  await leftName.focus();
+  await page.keyboard.press('Space');
+  const keyboardLeft = await waitForRequest(13);
+  assert.deepEqual(keyboardLeft.data.subject_ids,['person-0']);
+  await keyboardLeft.reply(result([.15,.1,.5,.85]));
+  await ready();
+  assert.equal(await page.locator('#cropPanel').isVisible(),true,'Activating a person name must not apply or close the crop.');
   await page.locator('#cancelCrop').click();
   await page.waitForFunction(() => document.getElementById('cropPanel').hidden);
   await enterCrop();
   assert.equal(await crop(),adjusted,'Cancelling a subset preview changed the accepted manual crop.');
   await page.locator('#cancelCrop').click();
   assert.deepEqual(errors,[]);
-  console.log('Passed browser Smart Crop preview, exact two-of-three checkbox selection, no-subject, cancellation, preset race, manual adjustment and explicit Apply.');
+  console.log('Passed browser Smart Crop preview, additive checkboxes, exclusive person-name clicks and keyboard activation, no-subject, cancellation, preset race, manual adjustment and explicit Apply.');
   await page.close();
   if (process.env.FIELDROOM_SMARTCROP_IMAGE) await realInference(url);
   else console.log('Real-inference browser scenario skipped: FIELDROOM_SMARTCROP_IMAGE is not set.');

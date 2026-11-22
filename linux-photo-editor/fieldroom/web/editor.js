@@ -38,7 +38,8 @@ const smartCrop = {
   selectedSubject: null,
   selectedSubjects: null,
   choiceSignature: "",
-  inputs: new Map()
+  inputs: new Map(),
+  soloButtons: new Map()
 };
 
 function status(message) {
@@ -467,6 +468,17 @@ function buildStrip() {
   $("filmstrip").replaceChildren(frag);
 }
 
+document.querySelector(".film").addEventListener("wheel", e => {
+  // Browse thumbnails without changing the active photo or its crop preview.
+  // Consume the wheel even at either end so it cannot affect another control.
+  e.preventDefault();
+  e.stopPropagation();
+  const strip = $("filmstrip");
+  const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  const unit = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? strip.clientWidth : 1;
+  strip.scrollLeft += delta * unit;
+}, {passive: false});
+
 function queueThumb(p) {
   const b = thumbButtons.get(p.id);
   if (!b) return;
@@ -858,6 +870,7 @@ function syncSmartCropControls() {
   $("smartCropPreset").disabled = !available || !!browserTrial;
   $("smartCropAll").disabled = !available || !!browserTrial;
   for (const input of smartCrop.inputs.values()) input.disabled = !available || !!browserTrial;
+  for (const button of smartCrop.soloButtons.values()) button.disabled = !available || !!browserTrial;
   $("cancelDetection").hidden = !smartCrop.loading;
   $("smartCropControls").setAttribute("aria-busy", String(smartCrop.loading));
   $("applyCrop").disabled = !available || !viewport.box || smartCrop.loading;
@@ -893,24 +906,35 @@ function updateSmartCropSubjects() {
   if (signature !== smartCrop.choiceSignature) {
     smartCrop.choiceSignature = signature;
     smartCrop.inputs.clear();
+    smartCrop.soloButtons.clear();
     list.replaceChildren();
     for (const [index, subject] of people.entries()) {
-      const label = document.createElement("label");
-      label.className = "smart-crop-person";
+      const row = document.createElement("div");
+      row.className = "smart-crop-person";
+      const label = subject.label || "Detected person";
       const input = document.createElement("input");
       input.type = "checkbox";
       input.id = `smartCropPerson-${index}`;
       input.value = String(subject.id);
+      input.setAttribute("aria-label", `Include ${label} in crop`);
       input.onchange = () => {
         const chosen = new Set(smartCrop.selectedSubjects || []);
         input.checked ? chosen.add(input.value) : chosen.delete(input.value);
         return changeSmartCropSelection(people.filter(person => chosen.has(String(person.id))).map(person => String(person.id)));
       };
-      const name = document.createElement("span");
-      name.textContent = subject.label || "Detected person";
-      label.append(input, name);
-      list.append(label);
+      const name = document.createElement("button");
+      name.type = "button";
+      name.id = `smartCropName-${index}`;
+      name.className = "smart-crop-name";
+      name.dataset.subjectId = input.value;
+      name.textContent = label;
+      name.title = `Select only ${label}`;
+      name.setAttribute("aria-label", name.title);
+      name.onclick = () => changeSmartCropSelection([input.value]);
+      row.append(input, name);
+      list.append(row);
       smartCrop.inputs.set(String(subject.id), input);
+      smartCrop.soloButtons.set(String(subject.id), name);
     }
   }
   const selected = new Set(smartCrop.selectedSubjects || []);
@@ -1024,6 +1048,7 @@ function addSmartCropControls() {
   const subjectField = document.createElement("fieldset");
   subjectField.id = "smartCropSubjectField";
   subjectField.hidden = true;
+  subjectField.setAttribute("aria-describedby", "smartCropHint");
   const subjectLabel = document.createElement("legend");
   subjectLabel.textContent = "Include in crop";
   const allLabel = document.createElement("label");
@@ -1040,7 +1065,10 @@ function addSmartCropControls() {
   const selection = document.createElement("p");
   selection.id = "smartCropSelection";
   selection.setAttribute("aria-live", "polite");
-  subjectField.append(subjectLabel, allLabel, subjectList, selection);
+  const hint = document.createElement("p");
+  hint.id = "smartCropHint";
+  hint.textContent = "Tick boxes for a group. Click a name for just that person.";
+  subjectField.append(subjectLabel, allLabel, subjectList, selection, hint);
   const run = document.createElement("button");
   run.id = "suggestCrop";
   run.textContent = "Preview AI Crop";

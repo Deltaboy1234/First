@@ -1,6 +1,6 @@
 # Fieldroom for Linux
 
-Fieldroom 0.3.1 opens a folder of photos in its own Linux desktop window. The left panel holds the folder browser and Navigator, the filmstrip runs along the bottom, and the editing controls sit on the right. Auto Tone, manual editing, RAW development, and Smart Crop run on your computer.
+Fieldroom 0.3.2 opens a folder of photos in its own Linux desktop window. The left panel holds the folder browser and Navigator, the filmstrip runs along the bottom, and the editing controls sit on the right. Auto Tone, manual editing, RAW development, and Smart Crop run on your computer.
 
 The desktop application uses a **Qt window with an embedded local web interface**. It does not open your normal browser, but it is not a rewrite using native Qt widgets. Its Python service listens only on the local loopback interface. After the initial installation downloads the dependencies and approximately **36.1 MB of detection models**, editing and Smart Crop work without an internet connection or an AI account. Photos are not sent to a cloud service.
 
@@ -48,7 +48,7 @@ You can also download a ZIP of the **feature/fieldroom-linux-desktop** branch wh
 1. Open a photograph, then click **Crop** or press **R**.
 2. Choose **Very Tight**, **Tight**, **Normal**, **Loose**, or **Full Body**. Tight is the default portrait framing.
 3. Click **Preview AI Crop**. The detector runs locally on the complete, oriented photograph, before any existing crop.
-4. Review the proposed rectangle. Under **Include in crop**, tick the people you want to include, or choose **All people**. You can select one person, any combination, or everyone detected. The preview updates as you change the selection. You can also change the preset, move the rectangle, or resize its corners.
+4. Review the proposed rectangle. Under **Include in crop**, use the checkboxes to add or remove people, or choose **All people**. Click a person's name to select only that person and clear the other selections. The preview updates as you change the selection. You can also change the preset, move the rectangle, or resize its corners.
 5. Click **Apply Crop** or press **Enter** to accept the preview. **Cancel** or **Esc** leaves the accepted crop unchanged. Save the edited JPEG when you are ready.
 
 An individual portrait preset needs a confidently detected face. If no face is detected reliably, Fieldroom keeps your current crop and explains the problem; it does not guess a center crop or invent a head position from a body box. Try **Full Body** when the person is visible but their face is turned away, or crop manually. Full Body uses the whole detected person and includes breathing room; it preserves the visible body but cannot restore feet, hands, or a head that were outside the original photo. Detection can still miss a subject, particularly with occlusion, unusual poses, or a small face, so always review the preview.
@@ -104,7 +104,7 @@ The editor loads lossless tiles from the oriented, full-resolution source for de
 
 ## Edit and save a folder
 
-1. Click a filmstrip thumbnail or use **← / →** to browse. Adjust the sliders. Double-click a slider to reset it.
+1. Scroll the mouse wheel over the bottom filmstrip to move the thumbnails sideways without changing the active photo or crop preview. Horizontal trackpad scrolling works too. Click a thumbnail or use **← / →** to select another photo. Adjust the sliders. Double-click a slider to reset it.
 2. Press **R** to crop. Drag inside the original frame to draw a new crop. Once a smaller crop exists, drag inside it to move it or drag a corner to resize. **Enter** accepts. **Esc** cancels. The accepted crop stays with the photo as you browse.
 3. **Delete** moves the source to **Fieldroom Trash** in its original folder. **Undo delete** or **Ctrl+Z** restores it during the session. The original filename is retained for manual recovery later.
 4. **Save All** or **Ctrl+S** writes full-resolution JPEG copies to an **Edited** subfolder. It processes the open folder and any pending edits in other folders you visited. An untouched JPEG is copied without recompression. A camera RAW is developed into a JPEG. Source files are preserved.
