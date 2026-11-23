@@ -9,7 +9,8 @@ class PhotoViewport {
     loadTile,
     onCrop,
     onCropEdit,
-    onError
+    onError,
+    onComparePosition
   }) {
     this.view = byId("viewport");
     this.plane = byId("photoPlane");
@@ -19,6 +20,11 @@ class PhotoViewport {
     this.onCrop = onCrop;
     this.onCropEdit = onCropEdit;
     this.onError = onError;
+    this.onComparePosition = onComparePosition;
+    this.comparisonEnabled = false;
+    this.comparisonPosition = .5;
+    this.comparisonActive = false;
+    this.before = null;
     this.mode = "fit";
     this.nearMode = "fit";
     this.detailPercent = 100;
@@ -35,6 +41,7 @@ class PhotoViewport {
     this.frame = 0;
     this.space = false;
     this.usedSpace = false;
+    this.createComparison();
     this.zoomSelect = byId("zoomSelect");
     for (const [value, label] of [
         ["fit", "Fit"],
@@ -59,11 +66,15 @@ class PhotoViewport {
     window.addEventListener("blur", () => {
       this.space = false;
       this.drag = null;
+      this.comparePointer = null;
       this.usedSpace = false;
       this.schedule();
     });
   }
-  setSource(photo, settings, preview) {
+  setSource(photo, settings, preview, before = null) {
+    // A fresh overview also acknowledges managed AI preparation. Tiles that
+    // failed before that preparation completed must be allowed to load again.
+    this.failed.clear();
     this.photo = photo;
     this.settings = settings;
     this.version = photo.id + "|" + JSON.stringify(settings);
@@ -73,6 +84,17 @@ class PhotoViewport {
     const url = "data:image/jpeg;base64," + preview.image;
     byId("overviewPhoto").src = url;
     byId("navImage").src = url;
+    // The controller delivers the two previews together after its revision check.
+    // Reject mismatched framing instead of showing a misleading comparison.
+    const matches = (a, b) => Array.isArray(a) && Array.isArray(b) &&
+      a.length === b.length && a.every((value, index) => value === b[index]);
+    this.before = before?.settings && before.preview?.image &&
+      matches(before.preview.box, preview.box) && matches(before.preview.size, preview.size) ? {
+        settings: before.settings,
+        previewWidth: before.preview.pixels[0],
+        version: photo.id + "|" + JSON.stringify(before.settings)
+      } : null;
+    this.beforeImage.src = this.before ? "data:image/jpeg;base64," + before.preview.image : "";
     this.plane.hidden = false;
     byId("navWrap").hidden = false;
     byId("photoMessage").hidden = true;
@@ -82,6 +104,12 @@ class PhotoViewport {
     this.photo = null;
     this.box = null;
     this.drag = null;
+    this.before = null;
+    this.comparePointer = null;
+    this.comparisonActive = false;
+    this.beforeOverlay.hidden = true;
+    this.comparisonChrome.hidden = true;
+    this.beforeImage.src = "";
     this.wanted.clear();
     this.trimNodes();
     this.plane.hidden = true;
@@ -132,6 +160,121 @@ class PhotoViewport {
       visible: [clamp(-x / sw, 0, 1), clamp(-y / sh, 0, 1), clamp((w - x) / sw, 0, 1), clamp((h - y) / sh,
         0, 1)]
     };
+  }
+  createComparison() {
+    this.beforeOverlay = document.createElement("div");
+    this.beforeOverlay.id = "beforeOverlay";
+    this.beforeOverlay.hidden = true;
+    this.beforeImage = new Image();
+    this.beforeImage.id = "beforeOverview";
+    this.beforeImage.alt = "";
+    this.beforeImage.draggable = false;
+    this.beforeLayer = document.createElement("div");
+    this.beforeLayer.id = "beforeTileLayer";
+    this.beforeOverlay.append(this.beforeImage, this.beforeLayer);
+    this.plane.append(this.beforeOverlay);
+
+    this.comparisonChrome = document.createElement("div");
+    this.comparisonChrome.id = "comparisonChrome";
+    this.comparisonChrome.hidden = true;
+    this.beforeLabel = document.createElement("span");
+    this.beforeLabel.className = "comparison-label";
+    this.beforeLabel.textContent = "Before";
+    this.afterLabel = document.createElement("span");
+    this.afterLabel.className = "comparison-label";
+    this.afterLabel.textContent = "After";
+    const divider = this.comparisonDivider = document.createElement("div");
+    divider.id = "comparisonDivider";
+    divider.tabIndex = 0;
+    divider.setAttribute("role", "slider");
+    divider.setAttribute("aria-label", "Before and after split");
+    divider.setAttribute("aria-orientation", "horizontal");
+    divider.setAttribute("aria-valuemin", "0");
+    divider.setAttribute("aria-valuemax", "100");
+    divider.setAttribute("aria-valuenow", "50");
+    divider.title = "Drag to compare. Left/Right move the divider; Home/End show one side.";
+    const grip = document.createElement("span");
+    grip.className = "comparison-grip";
+    grip.setAttribute("aria-hidden", "true");
+    grip.textContent = "↔";
+    divider.append(grip);
+    this.comparisonChrome.append(this.beforeLabel, this.afterLabel, divider);
+    this.view.append(this.comparisonChrome);
+
+    const move = e => {
+      const g = this.geometry();
+      if (!g || !this.comparisonActive) return;
+      const left = Math.max(0, g.x), right = Math.min(g.w, g.x + g.sw);
+      if (right > left) this.setComparisonPosition((this.local(e).x - left) / (right - left));
+    };
+    divider.addEventListener("pointerdown", e => {
+      if (e.button !== 0 || !this.comparisonActive) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.comparePointer = e.pointerId;
+      divider.setPointerCapture(e.pointerId);
+      divider.focus({preventScroll: true});
+      move(e);
+    });
+    divider.addEventListener("pointermove", e => {
+      if (e.pointerId !== this.comparePointer) return;
+      e.preventDefault();
+      e.stopPropagation();
+      move(e);
+    });
+    const stop = e => {
+      if (e.pointerId !== this.comparePointer) return;
+      e.stopPropagation();
+      this.comparePointer = null;
+    };
+    divider.addEventListener("pointerup", stop);
+    divider.addEventListener("pointercancel", stop);
+    divider.addEventListener("lostpointercapture", () => { this.comparePointer = null; });
+    divider.addEventListener("keydown", e => {
+      const step = e.shiftKey ? .1 : .01;
+      const positions = {ArrowLeft: this.comparisonPosition - step,
+        ArrowRight: this.comparisonPosition + step, Home: 0, End: 1};
+      if (Object.prototype.hasOwnProperty.call(positions, e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.setComparisonPosition(positions[e.key]);
+      } else if ([" ", "Enter", "ArrowUp", "ArrowDown"].includes(e.key)) {
+        // These keys belong to the focused comparison control, not photo/crop shortcuts.
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+  }
+  setComparison(enabled) {
+    this.comparisonEnabled = !!enabled;
+    if (!enabled) this.comparePointer = null;
+    this.render();
+  }
+  setComparisonPosition(value) {
+    if (!Number.isFinite(value)) return;
+    this.comparisonPosition = clamp(value, 0, 1);
+    this.onComparePosition?.(this.comparisonPosition);
+    this.render();
+  }
+  renderComparison(g) {
+    this.comparisonActive = !!(g && this.comparisonEnabled && this.before && !this.draft);
+    this.beforeOverlay.hidden = !this.comparisonActive;
+    this.comparisonChrome.hidden = !this.comparisonActive;
+    if (!this.comparisonActive) return;
+    const left = Math.max(0, g.x), right = Math.min(g.w, g.x + g.sw),
+      top = Math.max(0, g.y), bottom = Math.min(g.h, g.y + g.sh),
+      split = left + (right - left) * this.comparisonPosition,
+      sourceSplit = clamp((split - g.x) / g.sw, 0, 1);
+    this.comparisonSourceSplit = sourceSplit;
+    this.beforeOverlay.style.clipPath = `inset(0 ${(1 - sourceSplit) * 100}% 0 0)`;
+    Object.assign(this.comparisonDivider.style, {left: split + "px", top: top + "px",
+      height: Math.max(0, bottom - top) + "px"});
+    this.comparisonDivider.setAttribute("aria-valuenow", String(Math.round(this.comparisonPosition * 100)));
+    this.comparisonDivider.setAttribute("aria-valuetext", `${Math.round(this.comparisonPosition * 100)}% before, ${Math.round((1 - this.comparisonPosition) * 100)}% after`);
+    Object.assign(this.beforeLabel.style, {left: left + 10 + "px", top: top + 10 + "px"});
+    Object.assign(this.afterLabel.style, {right: g.w - right + 10 + "px", top: top + 10 + "px"});
+    this.beforeLabel.hidden = split - left < 80;
+    this.afterLabel.hidden = right - split < 80;
   }
   anchor(point, g = this.geometry()) {
     return [clamp((point.x - g.x) / g.sw, 0, 1), clamp((point.y - g.y) / g.sh, 0, 1)];
@@ -241,6 +384,7 @@ class PhotoViewport {
     this.position(byId("navFrame"), g.visible);
     byId("cropLayer").hidden = !this.draft;
     if (this.draft) this.drawCrop();
+    this.renderComparison(g);
     this.planTiles(g);
   }
   position(node, box) {
@@ -254,28 +398,35 @@ class PhotoViewport {
   }
   planTiles(g) {
     const wanted = new Map(),
-      density = g.scale * g.dpr;
-    if (density > this.previewWidth / g.width * 1.075 || (typeof this.mode === "number" && this.mode >=
-      100)) {
+      density = g.scale * g.dpr,
+      items = [];
+    const sides = [{side: "after", version: this.version, settings: this.settings,
+      previewWidth: this.previewWidth,
+      left: this.comparisonActive ? this.comparisonSourceSplit : g.visible[0], right: g.visible[2]}];
+    if (this.comparisonActive) sides.push({side: "before", ...this.before,
+      left: g.visible[0], right: this.comparisonSourceSplit});
+    for (const side of sides) {
+      if (side.right <= side.left || !(density > side.previewWidth / g.width * 1.075 ||
+        (typeof this.mode === "number" && this.mode >= 100))) continue;
       const step = clamp(2 ** Math.floor(Math.log2(1 / density)), 1, 16),
         span = tileEdge * step;
-      const bounds = [g.l + g.visible[0] * g.width, g.t + g.visible[1] * g.height, g.l + g.visible[2] * g
+      const bounds = [g.l + side.left * g.width, g.t + g.visible[1] * g.height, g.l + side.right * g
         .width, g.t + g.visible[3] * g.height
       ];
       const cx = (bounds[0] + bounds[2]) / 2,
-        cy = (bounds[1] + bounds[3]) / 2,
-        items = [];
+        cy = (bounds[1] + bounds[3]) / 2;
       for (let row = Math.floor(bounds[1] / span); row < Math.ceil(bounds[3] / span); row++) {
         for (let column = Math.floor(bounds[0] / span); column < Math.ceil(bounds[2] / span); column++) {
           const x0 = Math.max(column * span, g.l),
             y0 = Math.max(row * span, g.t);
           const x1 = Math.min((column + 1) * span, g.r),
             y1 = Math.min((row + 1) * span, g.b);
-          const key = `${this.version}|${step}/${column}/${row}`;
+          const key = `${side.side === "before" ? "before:" : ""}${side.version}|${step}/${column}/${row}`;
           items.push({
             key,
+            side: side.side,
             id: this.photo.id,
-            recipe: this.settings,
+            recipe: side.settings,
             column,
             row,
             step,
@@ -286,8 +437,8 @@ class PhotoViewport {
           });
         }
       }
-      items.sort((a, b) => a.distance - b.distance).forEach(tile => wanted.set(tile.key, tile));
     }
+    items.sort((a, b) => a.distance - b.distance).forEach(tile => wanted.set(tile.key, tile));
     this.wanted = wanted;
     this.trimNodes();
     this.pump();
@@ -306,7 +457,7 @@ class PhotoViewport {
     img.draggable = false;
     img.src = url;
     this.position(img, tile.box);
-    this.layer.append(img);
+    (tile.side === "before" ? this.beforeLayer : this.layer).append(img);
     this.nodes.set(tile.key, img);
   }
   pump() {
@@ -373,6 +524,7 @@ class PhotoViewport {
     byId("aspect").value = "Free";
     byId("cropLayer").hidden = false;
     this.drawCrop();
+    this.renderComparison(this.geometry());
   }
   endCrop() {
     const crop = this.draft;

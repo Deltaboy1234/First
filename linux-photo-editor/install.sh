@@ -23,6 +23,8 @@ fi
 "$install_dir/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$source_dir[desktop]"
 "$install_dir/venv/bin/python" -m fieldroom.models --download
 "$install_dir/venv/bin/python" -m fieldroom.models --check
+"$install_dir/venv/bin/python" -m fieldroom.enhance_models --download
+"$install_dir/venv/bin/python" -m fieldroom.enhance_models --check
 launcher="$install_dir/venv/bin/fieldroom-desktop"
 link_launcher() {
     local link="$1" target=""

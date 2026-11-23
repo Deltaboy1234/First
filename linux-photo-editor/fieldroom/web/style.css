@@ -1203,3 +1203,120 @@ body.photo-only #viewport {
   font-size: 11px;
   color: var(--muted);
 }
+
+/* Aligned Before/After layers share the photo plane, crop, and zoom geometry. */
+#beforeOverlay,
+#beforeTileLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+#beforeOverlay {
+  z-index: 1;
+}
+#beforeOverview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+#beforeTileLayer img {
+  display: block;
+  position: absolute;
+  max-width: none;
+}
+.pixel-detail #beforeTileLayer img {
+  image-rendering: pixelated;
+}
+#comparisonChrome {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.comparison-label {
+  position: absolute;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #17191bd9;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  box-shadow: 0 1px 3px #0006;
+}
+#comparisonDivider {
+  position: absolute;
+  width: 22px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  outline-offset: -3px;
+}
+#comparisonDivider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 10px;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 3px #000b;
+}
+.comparison-grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #222426;
+  color: #fff;
+  font-size: 21px;
+  box-shadow: 0 1px 5px #0008;
+}
+#comparisonDivider:focus-visible .comparison-grip {
+  background: var(--selected);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Editing workflow controls */
+.history-actions {
+  display: flex;
+  gap: 3px;
+  padding-right: 8px;
+  border-right: 1px solid var(--line);
+}
+#recoveryStatus {
+  flex: none;
+  max-width: 180px;
+  margin: 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#recoveryStatus.save-error { color: #edb69c; }
+#autoColor,
+.ai-detail-body button { width: 100%; margin: 4px 0; }
+.control-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+#aiProgress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--accent); }
+.ai-detail-body .slider-row { grid-template-columns: 92px minmax(40px, 1fr) 30px; }
+@media(max-width:1100px) {
+  .toolbar { flex-wrap: wrap; }
+  .center { grid-template-rows: 45px minmax(0, 1fr) auto; }
+}
+@media(max-width:670px) {
+  .appbar .module { display: none; }
+  .appbar .actions { gap: 4px; }
+  .history-actions { padding-right: 4px; }
+  .history-actions button { padding: 5px; }
+  .ai-detail-body .slider-row { grid-template-columns: 70px minmax(30px, 1fr) 25px; }
+}

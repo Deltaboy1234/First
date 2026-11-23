@@ -9,6 +9,7 @@ import argparse
 import os
 from pathlib import Path
 import threading
+import time
 
 from . import __version__
 
@@ -23,9 +24,9 @@ def main() -> None:
 
     # Import Qt only when desktop mode is requested, leaving CLI/headless use intact.
     try:
-        from PySide6.QtCore import QUrl, Qt
+        from PySide6.QtCore import QUrl, Qt, QTimer
         from PySide6.QtGui import QAction, QKeySequence
-        from PySide6.QtWidgets import QApplication, QMainWindow, QFileDialog
+        from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
         from PySide6.QtWebEngineWidgets import QWebEngineView
     except ImportError as exc:
         parser.error("Qt desktop dependencies missing. Install PySide6 and PySide6-Addons: " + str(exc))
@@ -52,7 +53,67 @@ def main() -> None:
                 self.browser.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
                 self.setCentralWidget(self.browser)
                 self.browser.setUrl(QUrl(server.origin + "/#" + server.key))
+                self._allow_close = False
+                self._closing_request = False
+                self._close_poll_pending = False
+                self._close_timer = QTimer(self)
+                self._close_timer.setInterval(100)
+                self._close_timer.timeout.connect(self._poll_close)
                 self._add_actions()
+
+            def closeEvent(self, event):
+                if self._allow_close:
+                    super().closeEvent(event)
+                    return
+                event.ignore()
+                if self._closing_request:
+                    return
+                self._closing_request = True
+                self._close_deadline = time.monotonic() + 30
+                self.browser.page().runJavaScript("""
+                    globalThis.__fieldroomCloseResult = null;
+                    Promise.resolve().then(() =>
+                        typeof globalThis.fieldroomPrepareClose === 'function'
+                            ? globalThis.fieldroomPrepareClose() : true
+                    ).then(ready => {
+                        globalThis.__fieldroomCloseResult = ready ? 'ready' : 'cancelled';
+                    }).catch(() => { globalThis.__fieldroomCloseResult = 'failed'; });
+                """)
+                self._close_timer.start()
+
+            def _poll_close(self):
+                if not self._closing_request:
+                    return
+                if time.monotonic() >= self._close_deadline:
+                    self._close_result("failed")
+                    return
+                if self._close_poll_pending:
+                    return
+                self._close_poll_pending = True
+                self.browser.page().runJavaScript("globalThis.__fieldroomCloseResult", self._close_result)
+
+            def _close_result(self, result):
+                self._close_poll_pending = False
+                if not self._closing_request or result not in ("ready", "cancelled", "failed"):
+                    return
+                self._close_timer.stop()
+                self._closing_request = False
+                if result == "ready":
+                    self._allow_close = True
+                    self.close()
+                elif result == "failed":
+                    choice = QMessageBox.warning(
+                        self, "Save edit recovery",
+                        "Fieldroom could not confirm that your latest edits were saved. "
+                        "Retry, keep the window open, or close without saving the latest changes.",
+                        QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Cancel)
+                    if choice == QMessageBox.StandardButton.Retry:
+                        self.close()
+                    elif choice == QMessageBox.StandardButton.Discard:
+                        self.browser.page().runJavaScript("globalThis.__fieldroomDiscardClose = true;")
+                        self._allow_close = True
+                        self.close()
 
             def _add_actions(self):
                 refresh = QAction("Refresh workspace", self)

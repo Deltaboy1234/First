@@ -13,6 +13,9 @@ jobs:
   install-and-edit:
     runs-on: ubuntu-24.04
     timeout-minutes: 18
+    env:
+      FIELDROOM_STATE_DIR: ${{ runner.temp }}/fieldroom-test-state
+      FIELDROOM_AI_CACHE_DIR: ${{ runner.temp }}/fieldroom-test-ai-cache
     defaults:
       run:
         working-directory: linux-photo-editor
@@ -52,6 +55,9 @@ jobs:
           fi
           node tests/smartcrop_ui.cjs
           node tests/browser.cjs
+          export FIELDROOM_COMPARISON_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Before-After.png"
+          node tests/comparison_browser.cjs
+          node tests/editing_workflow_browser.cjs
           export FIELDROOM_SMARTCROP_IMAGE="$RUNNER_TEMP/fieldroom-model-fixtures/basketball1.png"
           export FIELDROOM_SMARTCROP_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Smart-Crop.png"
           export FIELDROOM_GROUPCROP_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Group-Crop.png"
@@ -81,4 +87,5 @@ jobs:
           path: |
             ${{ runner.temp }}/Fieldroom-Smart-Crop.png
             ${{ runner.temp }}/Fieldroom-Group-Crop.png
+            ${{ runner.temp }}/Fieldroom-Before-After.png
           if-no-files-found: ignore

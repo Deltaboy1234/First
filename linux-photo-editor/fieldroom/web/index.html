@@ -25,7 +25,7 @@
 <header class="appbar">
   <div class="brand"><img src="/icon.svg" alt="">Fieldroom</div>
   <div class="module"><svg><use href="#adjust"/></svg>Develop</div>
-  <div class="actions"><button id="openFolder" title="Open a photo folder (Ctrl+O)"><svg><use href="#open"/></svg>Open folder</button>
+  <div class="actions"><div class="history-actions" aria-label="Edit history"><button id="undoEdit" title="Undo edit (Ctrl+Z)" disabled>Undo</button><button id="redoEdit" title="Redo edit (Ctrl+Shift+Z)" disabled>Redo</button></div><button id="openFolder" title="Open a photo folder (Ctrl+O)"><svg><use href="#open"/></svg>Open folder</button>
     <button class="primary" id="saveAll" title="Save full-resolution copies to Edited (Ctrl+S)"><svg><use href="#save"/></svg><span>Save All</span></button></div>
 </header>
 <main class="workspace">
@@ -51,6 +51,7 @@
    <div class="toolbar"><div class="tool-actions">
      <button id="cropTool" title="Crop (R)" aria-pressed="false"><svg><use href="#crop"/></svg>Crop</button>
      <button id="originalTool" title="Show the original tones with the same framing" aria-pressed="false"><svg><use href="#before"/></svg><span>Original</span></button>
+     <button id="beforeAfter" title="Drag the divider to compare original and edited tones" aria-pressed="false">Before / After</button>
      <button id="applyCrop" class="primary" hidden>Apply crop</button><button id="cancelCrop" hidden>Cancel</button>
    </div><div class="zoom-tools"><button id="zoomOut" title="Zoom out (−)" aria-label="Zoom out">−</button><select id="zoomSelect" aria-label="Zoom level"></select><button id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button></div>
    <div class="photo-actions"><button id="trashPhoto" title="Move to Fieldroom Trash (Delete)" aria-label="Move photo to trash"><svg><use href="#trash"/></svg></button>
@@ -67,7 +68,7 @@
  </aside>
 </main>
 <section class="film" aria-label="Filmstrip"><header><svg><use href="#film"/></svg><h2>Filmstrip</h2><span id="filmInfo"></span><span class="film-order">Filename order</span></header><div id="filmstrip" role="listbox" aria-label="Photos"></div></section>
-<footer class="statusbar"><span id="status" role="status">Starting…</span><button id="undoTrash" hidden>Undo delete</button><span class="shortcuts">← → Browse　 R Crop　 Space Zoom　 Delete Trash</span></footer>
+<footer class="statusbar"><span id="status" role="status">Starting…</span><span id="recoveryStatus" aria-live="polite" title="Adjustment settings are saved automatically; Save All exports edited JPEGs."></span><button id="undoTrash" hidden>Undo delete</button><span class="shortcuts">← → Browse　 R Crop　 Space Zoom　 Delete Trash</span></footer>
 <dialog id="folderDialog"><header><h2>Open folder</h2><button class="close-dialog" aria-label="Close">×</button></header>
  <form id="pathForm"><label for="folderPath">Folder path</label><div><input id="folderPath" autocomplete="off" spellcheck="false"><button>Go</button></div></form>
  <div class="browser-body"><div id="dialogPlaces"></div><div><button id="dialogUp"><svg><use href="#folderup"/></svg>Parent folder</button><div id="dialogFolders"></div></div></div>
