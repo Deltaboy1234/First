@@ -32,7 +32,8 @@ async function run() {
   server = spawn(python, ["-u", "app.py", "--no-browser", roll], {
     cwd: root,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {...process.env, FIELDROOM_STATE_DIR: path.join(temp, "state")}
   });
   server.stderr.on("data", d => process.stderr.write(d));
   const url = await new Promise((resolve, reject) => {
@@ -77,6 +78,19 @@ async function run() {
       vp = page.locator("#viewport");
     await page.waitForFunction(() => document.querySelector("#infoSize").textContent.includes("3,200") ||
       document.querySelector("#infoSize").textContent.includes("3200"));
+    // A new browser context still recovers accepted edits from this server's
+    // durable store. Start each density pass with the full original framing.
+    const resetPreview = dpr === 2 ? page.waitForResponse(response => {
+      if (!response.url().endsWith("/api/preview")) return false;
+      const recipe = response.request().postDataJSON().recipe;
+      return recipe.exposure === 0 && JSON.stringify(recipe.crop) === "[0,0,1,1]";
+    }) : null;
+    await page.locator("#resetAll").click();
+    if (resetPreview) {
+      const result = await (await resetPreview).json();
+      await page.waitForFunction(src => document.querySelector("#overviewPhoto").src === src,
+        "data:image/jpeg;base64," + result.image);
+    }
     const fitted = await plane.boundingBox();
     assert(fitted.width < 1000);
     const photo = await vp.boundingBox();
@@ -187,7 +201,8 @@ async function run() {
     await context.close();
     console.log(`Passed ${dpr}× display zoom, pan, Navigator, crop, navigation and horizontal filmstrip scrolling`);
     if (dpr === 1) {
-      // Use fresh originals for the next display scale.
+      // Remove exported settings. Accepted recovery settings are reset through
+      // the actual UI at the start of the next display pass.
       const output = path.resolve(roll, "Edited");
       assert.equal(path.dirname(output), path.resolve(roll));
       fs.rmSync(output, {
