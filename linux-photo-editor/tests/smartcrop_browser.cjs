@@ -28,24 +28,43 @@ const result = (crop, extra = {}) => {
   return value;
 };
 
+async function startServer(folder, stateName) {
+  const child = spawn(python, ['-u','app.py','--no-browser',folder], {
+    cwd:root, env:{...process.env,FIELDROOM_STATE_DIR:path.join(temp,stateName)},
+    stdio:['ignore','pipe','pipe']
+  });
+  server = child;
+  child.stderr.on('data', chunk => process.stderr.write(chunk));
+  return new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(Error('Fieldroom did not start.')), 15000);
+    child.stdout.on('data', chunk => {
+      output += chunk;
+      const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#[A-Za-z0-9_-]+[\r\n]/);
+      if (match) {clearTimeout(timer);resolve(match[0].trim());}
+    });
+    child.once('error', error => {clearTimeout(timer);reject(error);});
+    child.once('exit', code => {clearTimeout(timer);reject(Error(`Fieldroom exited during startup (${code}).`));});
+  });
+}
+
+async function stopServer() {
+  const child = server;
+  server = null;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise(resolve => {
+    const timer = setTimeout(() => child.kill('SIGKILL'),3000);
+    child.once('exit',() => {clearTimeout(timer);resolve();});
+    child.kill();
+  });
+}
+
 async function run() {
   const fixture = spawnSync(python, ['-c',
     "import runpy,sys; from pathlib import Path; runpy.run_path('tests/test_editor.py')['make_roll'](Path(sys.argv[1]))", roll
   ], {cwd:root,encoding:'utf8'});
   if (fixture.status !== 0) throw Error(fixture.stderr || 'Could not prepare test photos.');
-  server = spawn(python, ['-u','app.py','--no-browser',roll], {cwd:root,stdio:['ignore','pipe','pipe']});
-  server.stderr.on('data', chunk => process.stderr.write(chunk));
-  const url = await new Promise((resolve, reject) => {
-    let output = '';
-    const timer = setTimeout(() => reject(Error('Fieldroom did not start.')), 15000);
-    server.stdout.on('data', chunk => {
-      output += chunk;
-      const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#[A-Za-z0-9_-]+[\r\n]/);
-      if (match) {clearTimeout(timer);resolve(match[0].trim());}
-    });
-    server.once('error', error => {clearTimeout(timer);reject(error);});
-    server.once('exit', code => {clearTimeout(timer);reject(Error(`Fieldroom exited during startup (${code}).`));});
-  });
+  const url = await startServer(roll, 'Controlled state');
   browser = await chromium.launch({headless:true,executablePath:process.env.FIELDROOM_BROWSER || undefined});
   const page = await browser.newPage({viewport:{width:1366,height:900}});
   page.setDefaultTimeout(15000);
@@ -219,12 +238,14 @@ async function run() {
   await page.locator('#cancelCrop').click();
   assert.deepEqual(errors,[]);
   console.log('Passed browser Smart Crop preview, additive checkboxes, exclusive person-name clicks and keyboard activation, no-subject, cancellation, preset race, manual adjustment and explicit Apply.');
+  assert.equal(await page.evaluate(() => globalThis.fieldroomPrepareClose()),true);
   await page.close();
-  if (process.env.FIELDROOM_SMARTCROP_IMAGE) await realInference(url);
+  await stopServer();
+  if (process.env.FIELDROOM_SMARTCROP_IMAGE) await realInference();
   else console.log('Real-inference browser scenario skipped: FIELDROOM_SMARTCROP_IMAGE is not set.');
 }
 
-async function realInference(url) {
+async function realInference() {
   const image = path.resolve(process.env.FIELDROOM_SMARTCROP_IMAGE);
   assert(fs.existsSync(image), 'FIELDROOM_SMARTCROP_IMAGE must name the downloaded public basketball1.png fixture.');
   const realRoll = path.join(temp,'Real inference');
@@ -234,6 +255,9 @@ async function realInference(url) {
   fs.copyFileSync(image,original);
   const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   const originalHash = hash(original), sourceHash = hash(image);
+  // Recovery deliberately persists accepted edits across pages. Keep this
+  // one-photo export scenario separate from the earlier controlled edits.
+  const url = await startServer(realRoll, 'Real inference state');
   const page = await browser.newPage({viewport:{width:1366,height:900}});
   page.setDefaultTimeout(30000);
   const errors = [];
@@ -395,12 +419,6 @@ async function realInference(url) {
 run().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {
   await Promise.allSettled([...pendingRouteReleases].map(release => release()));
   if (browser) await browser.close();
-  if (server && server.exitCode === null) {
-    await new Promise(resolve => {
-      const timer = setTimeout(() => {server.kill('SIGKILL');resolve();},3000);
-      server.once('exit',() => {clearTimeout(timer);resolve();});
-      server.kill();
-    });
-  }
+  await stopServer();
   fs.rmSync(temp,{recursive:true,force:true,maxRetries:4,retryDelay:200});
 });
