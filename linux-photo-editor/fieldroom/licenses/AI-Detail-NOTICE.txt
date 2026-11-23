@@ -1,0 +1,54 @@
+Fieldroom offline AI detail models
+=================================
+
+The installer downloads two pretrained models. Runtime processing is local;
+neither inference nor model lookup accesses the internet. Models are stored
+outside the application's source tree and checked by exact size and SHA-256.
+
+1. DnCNN color-blind denoising
+----------------------------
+Authors: Kai Zhang, Wangmeng Zuo, Yunjin Chen, Deyu Meng, Lei Zhang.
+Original model: dncnn_color_blind.pth, KAIR release v1.0.
+https://github.com/cszn/KAIR
+https://github.com/cszn/KAIR/releases/download/v1.0/dncnn_color_blind.pth
+Paper: Beyond a Gaussian Denoiser: Residual Learning of Deep CNN for Image
+Denoising (IEEE Transactions on Image Processing, 2017).
+
+ONNX conversion: ikeno-web/npuscale release v1.2, dncnn_color.onnx.
+https://github.com/ikeno-web/npuscale/releases/tag/v1.2
+Conversion source inspected at commit
+7239169a030f2d017eacb840a3c2c0890509c626, tools/convert_dncnn.py.
+The conversion includes clean = input - predicted_noise, so Fieldroom uses
+the model output directly rather than subtracting it a second time.
+
+Model and conversion licenses: MIT. Complete notices are in
+DnCNN-KAIR-MIT.txt and DnCNN-ONNX-Conversion-MIT.txt.
+Downloaded bytes: 2680354
+SHA-256: 0dbe1d53877efb63019416b000b6f725fd0b5e706305f11954b0bc8f53513a84
+
+2. ESPCN / sub-pixel CNN detail restoration
+-----------------------------------------
+Source: ONNX Model Zoo, super_resolution/sub_pixel_cnn_2016.
+Pinned repository commit: c5cae0f1942c8d7727372c7b1f6b485aa39e4421.
+https://github.com/onnx/models/tree/c5cae0f1942c8d7727372c7b1f6b485aa39e4421/validated/vision/super_resolution/sub_pixel_cnn_2016
+Pretrained using the BSD300 training images through the PyTorch
+super_resolution example, as documented by the model provider.
+Paper: Real-Time Single Image and Video Super-Resolution Using an Efficient
+Sub-Pixel Convolutional Neural Network, Shi et al. (CVPR, 2016).
+
+License: Apache License 2.0, reproduced in ESPCN-ONNX-Apache-2.0.txt.
+Downloaded bytes: 240078
+SHA-256: 85f36ff88cc504a24af5e0602148bc56a8aa09a58eca8c0da2756f3e8186035e
+
+Fieldroom's application of this model is a local adaptation: the trained
+network predicts 3x luminance, which is reduced to the input dimensions;
+the learned luminance difference is then blended with the source according
+to the user's AI Sharpen strength. Color channels are retained, the final
+pixel dimensions do not increase, and the source file is never overwritten.
+This is modest learned detail restoration, not guaranteed recovery of
+missing focus, motion-blurred detail, or subject identity.
+
+Both outputs should be reviewed at 100% before accepting. DnCNN is trained
+for image noise and cannot guarantee removal of every camera noise pattern.
+Strong denoising can soften fine textures. The two trained models are distinct
+from Fieldroom's conventional median/blur/unsharp-mask detail controls.

@@ -2,7 +2,8 @@
 (() => {
   const get = id => document.getElementById(id);
   const defaults = {exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0,
-    blacks: 0, warmth: 0, saturation: 0, luminance: 0, color: 0, sharpen: 0,
+    blacks: 0, warmth: 0, tint: 0, vibrance: 0, saturation: 0, luminance: 0, color: 0, sharpen: 0,
+    ai_denoise: 0, ai_sharpen: 0,
     radius: 1, crop: [0, 0, 1, 1]};
   const samplePath = "/Sample roll";
   const photos = new Map(), folders = new Map(), decoded = new Map();
@@ -83,12 +84,12 @@
     });
   }
   function develop(canvas, r) {
-    const tonal = ["exposure","contrast","highlights","shadows","whites","blacks","warmth","saturation"].some(k => r[k]);
+    const tonal = ["exposure","contrast","highlights","shadows","whites","blacks","warmth","tint","vibrance","saturation"].some(k => r[k]);
     const detail = r.luminance || r.color || r.sharpen;
     if (!tonal && !detail) return;
     const ctx = canvas.getContext("2d", {willReadFrequently:true});
     const gain = 2 ** r.exposure, warm = .0024 * r.warmth;
-    const tables = [toneTable(gain * (1 + warm)), toneTable(gain), toneTable(gain * (1 - warm))];
+    const tables = [toneTable(gain * (1 + warm)), toneTable(gain * (1 - .002 * (r.tint || 0))), toneTable(gain * (1 - warm))];
     const contrast = 1 + r.contrast * .008, sat = 1 + r.saturation * .01;
     const w = canvas.width, h = canvas.height, radius = Math.max(1, Math.round(r.radius));
     let previousRows;
@@ -122,7 +123,11 @@
           const lift = .014*(r.shadows*s*s*y + r.highlights*y*y*s) + .002*(r.whites*y**4 + r.blacks*s**4);
           red=.45+(red+lift-.45)*contrast; green=.45+(green+lift-.45)*contrast; blue=.45+(blue+lift-.45)*contrast;
           const gray=red*.2126+green*.7152+blue*.0722;
-          red=255*(gray+(red-gray)*sat); green=255*(gray+(green-gray)*sat); blue=255*(gray+(blue-gray)*sat);
+          const peak=Math.max(red,green,blue), low=Math.min(red,green,blue);
+          const saturation=Math.max(0,Math.min(1,(peak-low)/Math.max(peak,.001)));
+          const protection=red>green*1.02 && green>blue*1.02 ? .45 : 1;
+          const factor=sat*(1+(r.vibrance||0)/100*(1-saturation)*protection);
+          red=255*(gray+(red-gray)*factor); green=255*(gray+(green-gray)*factor); blue=255*(gray+(blue-gray)*factor);
         }
         data[i]=red; data[i+1]=green; data[i+2]=blue;
       }

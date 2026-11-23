@@ -29,6 +29,7 @@ body {
   height: 100dvh;
   min-height: 410px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 58px minmax(0, 1fr) clamp(106px, 15.5vh, 143px) 28px;
   overflow: hidden
 }
@@ -194,6 +195,7 @@ h2 {
 .workspace {
   display: grid;
   grid-template-columns: clamp(168px, 15.2vw, 230px) minmax(0, 1fr) clamp(232px, 20.2vw, 318px);
+  min-width: 0;
   min-height: 0
 }
 
@@ -771,6 +773,8 @@ kbd {
   align-items: stretch;
   gap: 6px;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #5b5d60 transparent;
   flex: 1;
@@ -828,6 +832,7 @@ kbd {
 }
 
 .statusbar {
+  min-width: 0;
   border-top: 1px solid var(--line);
   padding: 0 13px;
   gap: 8px;
@@ -837,6 +842,7 @@ kbd {
 }
 
 #status {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -844,6 +850,7 @@ kbd {
 }
 
 .shortcuts {
+  flex: none;
   margin-left: auto;
   white-space: nowrap;
   color: var(--quiet)
@@ -1083,4 +1090,233 @@ dialog footer {
   .appbar button {
     font-size: 12px
   }
+}
+
+
+/* Distraction-free review: preserve the center viewport and its toolbar. */
+body.photo-only {
+  grid-template-rows: minmax(0, 1fr);
+}
+body.photo-only .appbar,
+body.photo-only .film,
+body.photo-only .statusbar,
+body.photo-only .left-panel,
+body.photo-only .right-panel,
+body.photo-only .photo-heading,
+body.photo-only .toolbar {
+  display: none !important;
+}
+body.photo-only .workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+body.photo-only .center {
+  grid-template-rows: minmax(0, 1fr);
+}
+body.photo-only #viewport {
+  background: #141516;
+}
+#autoTone {
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+.smart-crop-controls {
+  padding: 8px 0 16px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.smart-crop-controls select,
+.smart-crop-controls button {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  padding: 7px;
+}
+.smart-crop-controls label,
+#smartCropNotice {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#smartCropNotice {
+  margin: 8px 0 0;
+}
+#smartCropSubjectField {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+#smartCropSubjectField legend {
+  padding: 0;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+#smartCropSubjects {
+  max-height: 140px;
+  overflow-y: auto;
+}
+.smart-crop-controls .smart-crop-person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 5px 2px;
+}
+.smart-crop-person input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.smart-crop-person span {
+  overflow-wrap: anywhere;
+}
+.smart-crop-controls .smart-crop-name {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  padding: 2px 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.smart-crop-controls .smart-crop-name:hover:not(:disabled) {
+  background: var(--panel2);
+  color: var(--text);
+}
+.smart-crop-all {
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+#smartCropSelection,
+#smartCropHint {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Aligned Before/After layers share the photo plane, crop, and zoom geometry. */
+#beforeOverlay,
+#beforeTileLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+#beforeOverlay {
+  z-index: 1;
+}
+#beforeOverview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+#beforeTileLayer img {
+  display: block;
+  position: absolute;
+  max-width: none;
+}
+.pixel-detail #beforeTileLayer img {
+  image-rendering: pixelated;
+}
+#comparisonChrome {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.comparison-label {
+  position: absolute;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #17191bd9;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  box-shadow: 0 1px 3px #0006;
+}
+#comparisonDivider {
+  position: absolute;
+  width: 22px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  outline-offset: -3px;
+}
+#comparisonDivider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 10px;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 3px #000b;
+}
+.comparison-grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #222426;
+  color: #fff;
+  font-size: 21px;
+  box-shadow: 0 1px 5px #0008;
+}
+#comparisonDivider:focus-visible .comparison-grip {
+  background: var(--selected);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Editing workflow controls */
+.history-actions {
+  display: flex;
+  gap: 3px;
+  padding-right: 8px;
+  border-right: 1px solid var(--line);
+}
+#recoveryStatus {
+  flex: none;
+  max-width: 180px;
+  margin: 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#recoveryStatus.save-error { color: #edb69c; }
+#autoColor,
+.ai-detail-body button { width: 100%; margin: 4px 0; }
+.control-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+#aiProgress { display: block; width: 100%; height: 8px; margin: 8px 0; accent-color: var(--accent); }
+.ai-detail-body .slider-row { grid-template-columns: 92px minmax(40px, 1fr) 30px; }
+@media(max-width:1100px) {
+  .toolbar { flex-wrap: wrap; }
+  .center { grid-template-rows: 45px minmax(0, 1fr) auto; }
+}
+@media(max-width:670px) {
+  .appbar .module { display: none; }
+  .appbar .actions { gap: 4px; }
+  .history-actions { padding-right: 4px; }
+  .history-actions button { padding: 5px; }
+  .ai-detail-body .slider-row { grid-template-columns: 70px minmax(30px, 1fr) 25px; }
 }

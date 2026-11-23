@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import io
 import math
+from collections import OrderedDict
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+import threading
 
 import numpy as np
 from PIL import Image, ImageCms, ImageFilter, ImageOps
@@ -20,8 +22,10 @@ FORMATS = RAWS | set(".jpg .jpeg .png .tif .tiff .webp .bmp".split())
 LIMITS = {
     "exposure": (-4, 4), "contrast": (-100, 100), "highlights": (-100, 100),
     "shadows": (-100, 100), "whites": (-100, 100), "blacks": (-100, 100),
-    "warmth": (-100, 100), "saturation": (-100, 100), "luminance": (0, 100),
+    "warmth": (-100, 100), "tint": (-100, 100), "vibrance": (-100, 100),
+    "saturation": (-100, 100), "luminance": (0, 100),
     "color": (0, 100), "sharpen": (0, 100), "radius": (0.5, 3),
+    "ai_denoise": (0, 100), "ai_sharpen": (0, 100),
 }
 DEFAULTS = {name: (1 if name == "radius" else 0) for name in LIMITS}
 FULL = (0.0, 0.0, 1.0, 1.0)
@@ -51,6 +55,14 @@ class Source:
     size: tuple
     metadata: dict
     exif: bytes = b""
+    path: Path | None = None
+    fingerprint: str | None = None
+    enhancement: tuple | None = None
+
+
+def fingerprint(path):
+    stat = Path(path).stat()
+    return f"{stat.st_size}:{stat.st_mtime_ns}"
 
 
 def read_metadata(image):
@@ -110,7 +122,7 @@ def raster(path, edge):
             image = image.convert("RGB")
         if edge:
             image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
-        return Source(image, size, meta, exif)
+        return Source(image, size, meta, exif, Path(path), fingerprint(path))
 
 
 def decode(path: Path, edge=0, thumbnail=False):
@@ -133,7 +145,7 @@ def decode(path: Path, edge=0, thumbnail=False):
                     else:
                         image = Image.fromarray(thumb.data).convert("RGB")
                     image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
-                    return Source(image, size, {})
+                    return Source(image, size, {}, path=Path(path), fingerprint=fingerprint(path))
                 except (rawpy.LibRawError, OSError, ValueError):
                     pass
             pixels = raw.postprocess(use_camera_wb=True, no_auto_bright=True, half_size=bool(edge),
@@ -153,12 +165,163 @@ def decode(path: Path, edge=0, thumbnail=False):
             meta, exif = read_metadata(tags)
     except (OSError, ValueError, TypeError, SyntaxError):
         pass
-    return Source(pixels, size, meta, exif)
+    return Source(pixels, size, meta, exif, Path(path), fingerprint(path))
 
 
 @lru_cache(maxsize=3)
 def preview_source(path, fingerprint, edge):
     return decode(path, edge)
+
+
+_AI_LOCK = threading.RLock()
+_AI_RESIZE_LOCK = threading.RLock()
+_AI_CACHE = OrderedDict()
+_AI_RESIZED = OrderedDict()
+
+
+def _ai_key(path, source_fingerprint, denoise, sharpen):
+    from .enhance_models import MODELS
+    return ("fieldroom-ai-linear16-v1", str(Path(path).resolve()), source_fingerprint,
+            float(denoise), float(sharpen), tuple(model.sha256 for model in MODELS))
+
+
+class AIPreviewNotPrepared(ValueError):
+    code = "ai_not_prepared"
+
+
+def _resize_prepared(source, enhanced, strengths):
+    size = source.pixels.size if isinstance(source.pixels, Image.Image) else (source.pixels.shape[1], source.pixels.shape[0])
+    if size == enhanced.size:
+        return enhanced
+    key = (str(source.path), source.fingerprint, *strengths, *size)
+    with _AI_RESIZE_LOCK:
+        result = _AI_RESIZED.get(key)
+        if result is None:
+            pixels = np.stack([np.asarray(Image.fromarray(enhanced.pixels[:, :, c]).resize(
+                size, Image.Resampling.BILINEAR)) for c in range(3)], axis=2)
+            result = Source(pixels, enhanced.size, enhanced.metadata, enhanced.exif,
+                            enhanced.path, enhanced.fingerprint, strengths)
+            _AI_RESIZED[key] = result
+            while len(_AI_RESIZED) > 4:
+                _AI_RESIZED.popitem(last=False)
+        return result
+
+
+def prepared_ai_source(source, settings, *, required=False):
+    """Reuse an actual cached array without ever starting neural inference.
+
+    Keeping the mapped array alive closes the eviction/check race. Interactive
+    previews and tiles may request a managed job; filmstrip thumbnails stay fast.
+    """
+    strengths = (settings["ai_denoise"], settings["ai_sharpen"])
+    if not any(strengths) or source.enhancement == strengths:
+        return source
+    from . import ai_cache
+    enhanced = None
+    if source.path is not None and source.fingerprint is not None:
+        key = _ai_key(source.path, source.fingerprint, *strengths)
+        enhanced = _AI_CACHE.get(key)
+        if enhanced is None:
+            pixels = ai_cache.load(key, source.size)
+            if pixels is not None:
+                enhanced = Source(pixels, source.size, source.metadata, source.exif,
+                                  source.path, source.fingerprint, strengths)
+    if enhanced is not None:
+        return _resize_prepared(source, enhanced, strengths)
+    if required:
+        raise AIPreviewNotPrepared("Prepare AI detail before viewing this edit. The application will start a cancellable preview.")
+    return None
+
+
+def _enhance_source(source, denoise, sharpen, progress=None, cancelled=None):
+    from .enhance import apply_rgb, EnhancementCancelled
+    if cancelled and cancelled():
+        raise EnhancementCancelled("AI processing cancelled.")
+    if isinstance(source.pixels, Image.Image):
+        rgb = np.asarray(source.pixels, dtype=np.float32) / 255.0
+    else:
+        # Models consume sRGB floats. Preserve RAW precision through conversion;
+        # never quantize the working RAW into an 8-bit preview before enhancement.
+        rgb = np.empty(source.pixels.shape, dtype=np.float32)
+        for top in range(0, len(rgb), 160):
+            linear = source.pixels[top:top+160].astype(np.float32) / 65535.0
+            rgb[top:top+160] = np.where(linear <= .0031308, linear * 12.92,
+                1.055 * np.power(linear, 1/2.4) - .055)
+    model_progress = (lambda fraction, message: progress(fraction * .90, message)) if progress else None
+    enhanced = apply_rgb(rgb, denoise=denoise, sharpen=sharpen,
+                         progress=model_progress, cancelled=cancelled)
+    del rgb
+    linear = np.empty(enhanced.shape, dtype=np.uint16)
+    for top in range(0, len(enhanced), 160):
+        if cancelled and cancelled():
+            raise EnhancementCancelled("AI processing cancelled.")
+        band = np.clip(enhanced[top:top+160], 0, 1)
+        band = np.where(band <= .04045, band / 12.92, ((band + .055) / 1.055) ** 2.4)
+        linear[top:top+160] = np.clip(band * 65535 + .5, 0, 65535).astype(np.uint16)
+        if progress:
+            progress(.90 + .07 * min(top+160, len(enhanced)) / len(enhanced), "Preparing the full-resolution editing result…")
+    return Source(linear, source.size, source.metadata, source.exif, source.path,
+                  source.fingerprint, (float(denoise), float(sharpen)))
+
+
+def prepare_ai(path, source_fingerprint, denoise, sharpen, *, progress=None, cancelled=None):
+    """Prepare one original-resolution AI result shared by preview, zoom and export."""
+    from .enhance import EnhancementCancelled
+    from . import ai_cache
+    settings = recipe({"ai_denoise": denoise, "ai_sharpen": sharpen})
+    denoise, sharpen = settings["ai_denoise"], settings["ai_sharpen"]
+    path = Path(path).expanduser().resolve(strict=True)
+    key = _ai_key(path, source_fingerprint, denoise, sharpen)
+    with _AI_LOCK:
+        if cancelled and cancelled():
+            raise EnhancementCancelled("AI processing cancelled.")
+        if fingerprint(path) != source_fingerprint:
+            raise ValueError("The original changed. Reopen its folder before applying AI detail.")
+        if key in _AI_CACHE:
+            if progress:
+                progress(1.0, "Using the prepared AI detail result.")
+            return _AI_CACHE[key]
+        header = decode(path, edge=1)
+        stored = ai_cache.load(key, header.size)
+        if stored is not None:
+            result = Source(stored, header.size, header.metadata, header.exif, path,
+                            source_fingerprint, (denoise, sharpen))
+            if fingerprint(path) != source_fingerprint:
+                raise ValueError("The original changed while loading AI detail. Reopen its folder.")
+            _AI_CACHE.clear()
+            with _AI_RESIZE_LOCK:
+                _AI_RESIZED.clear()
+            _AI_CACHE[key] = result
+            if progress:
+                progress(1.0, "Reused the saved AI detail result.")
+            return result
+        source = decode(path)
+        result = _enhance_source(source, denoise, sharpen, progress, cancelled) if denoise or sharpen else source
+        if fingerprint(path) != source_fingerprint:
+            raise ValueError("The original changed during AI processing. Your edits are unchanged.")
+        if cancelled and cancelled():
+            raise EnhancementCancelled("AI processing cancelled.")
+        if denoise or sharpen:
+            if progress:
+                progress(.98, "Caching the AI result for reuse…")
+            ai_cache.save(key, result.pixels)
+        _AI_CACHE.clear()
+        with _AI_RESIZE_LOCK:
+            _AI_RESIZED.clear()
+        _AI_CACHE[key] = result
+        if progress:
+            progress(1.0, "AI detail is ready.")
+        return result
+
+
+def _source_with_ai(source, settings):
+    strengths = (settings["ai_denoise"], settings["ai_sharpen"])
+    if not any(strengths) or source.enhancement == strengths:
+        return source
+    if source.path is None or source.fingerprint is None:
+        return _enhance_source(source, *strengths)
+    enhanced = prepare_ai(source.path, source.fingerprint, *strengths)
+    return _resize_prepared(source, enhanced, strengths)
 
 
 def pixel_box(size, crop):
@@ -186,18 +349,19 @@ def apply_detail(image, r):
 
 def render(source, settings, *, box=None):
     r = recipe(settings)
+    source = _source_with_ai(source, r)
     raster_input = isinstance(source.pixels, Image.Image)
     size = source.pixels.size if raster_input else (source.pixels.shape[1], source.pixels.shape[0])
     if box is None:
         box = pixel_box(size, r["crop"])
-    tone_controls = ("exposure", "contrast", "highlights", "shadows", "whites", "blacks", "warmth", "saturation")
+    tone_controls = ("exposure", "contrast", "highlights", "shadows", "whites", "blacks", "warmth", "tint", "vibrance", "saturation")
     if raster_input and not any(r[k] for k in tone_controls):
         return apply_detail(source.pixels.crop(box), r)
     x0, y0, x1, y1 = box
     result = np.empty((y1-y0, x1-x0, 3), dtype=np.uint8)
     gain = 2 ** r["exposure"]
     warmth = r["warmth"] / 100
-    gains = np.array([1 + .24 * warmth, 1, 1 - .24 * warmth], dtype=np.float32) * gain
+    gains = np.array([1 + .24 * warmth, 1 - .20 * r["tint"] / 100, 1 - .24 * warmth], dtype=np.float32) * gain
     # Bound floating-point working memory for 45+ megapixel RAW files.
     for top in range(y0, y1, 160):
         bottom = min(top + 160, y1)
@@ -213,9 +377,17 @@ def render(source, settings, *, box=None):
                 + r["whites"] * luma**4 * .002 + r["blacks"] * shadow**4 * .002)
         rgb += lift[:,:,None]
         rgb = .45 + (rgb - .45) * (1 + r["contrast"] * .008)
-        if r["saturation"]:
+        if r["saturation"] or r["vibrance"]:
             grey = rgb[:,:,0] * .2126 + rgb[:,:,1] * .7152 + rgb[:,:,2] * .0722
-            rgb = grey[:,:,None] + (rgb - grey[:,:,None]) * (1 + r["saturation"] / 100)
+            factor = 1 + r["saturation"] / 100
+            if r["vibrance"]:
+                peak, low = np.max(rgb, axis=2), np.min(rgb, axis=2)
+                saturation = np.clip((peak - low) / np.maximum(peak, .001), 0, 1)
+                warm_colors = (rgb[:,:,0] > rgb[:,:,1] * 1.02) & (rgb[:,:,1] > rgb[:,:,2] * 1.02)
+                protection = np.where(warm_colors, .45, 1.0)
+                factor = factor * (1 + r["vibrance"] / 100 * (1 - saturation) * protection)
+                factor = factor[:,:,None]
+            rgb = grey[:,:,None] + (rgb - grey[:,:,None]) * factor
         result[top-y0:bottom-y0] = np.clip(rgb * 255 + .5, 0, 255).astype(np.uint8)
     return apply_detail(Image.fromarray(result), r)
 
@@ -256,3 +428,29 @@ def histogram(image):
     sample = image.copy()
     sample.thumbnail((260, 180))
     return np.array(sample.histogram()).reshape((3, 64, 4)).sum(axis=2).tolist()
+
+
+def auto_tone(source):
+    """Estimate conservative automatic adjustments from a downsampled sRGB preview.
+
+    This produces a non-destructive editing recipe; it never changes source pixels.
+    """
+    image = render(source, recipe())
+    image.thumbnail((640, 640), Image.Resampling.BILINEAR)
+    rgb = np.asarray(image, dtype=np.float32) / 255.0
+    if rgb.size == 0:
+        return recipe()
+    lum = rgb[..., 0] * .2126 + rgb[..., 1] * .7152 + rgb[..., 2] * .0722
+    p1, p10, p50, p90, p99 = np.percentile(lum, [1, 10, 50, 90, 99])
+    # Avoid aggressive brightening of intentional low-key/night photographs.
+    exposure = float(np.clip(np.log2(.43 / max(.08, p50)), -.85, .85))
+    highlights = float(np.clip(-90 * max(0.0, p99 - .91) / .09, -45, 0))
+    shadows = float(np.clip(80 * max(0.0, .22 - p10) / .22, 0, 38))
+    whites = float(np.clip(20 * (.94 - p99), -12, 12))
+    blacks = float(np.clip(-20 * p1, -12, 0))
+    contrast = float(np.clip((.63 - (p90 - p10)) * 25, -10, 12))
+    result = recipe()
+    result.update(exposure=round(exposure, 2), highlights=round(highlights),
+                  shadows=round(shadows), whites=round(whites),
+                  blacks=round(blacks), contrast=round(contrast))
+    return result

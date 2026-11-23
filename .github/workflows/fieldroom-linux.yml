@@ -12,7 +12,7 @@ permissions:
 jobs:
   install-and-edit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 18
     defaults:
       run:
         working-directory: linux-photo-editor
@@ -21,16 +21,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Isolate editing recovery and AI cache
+        run: |
+          printf 'FIELDROOM_STATE_DIR=%s\n' "$RUNNER_TEMP/fieldroom-test-state" >> "$GITHUB_ENV"
+          printf 'FIELDROOM_AI_CACHE_DIR=%s\n' "$RUNNER_TEMP/fieldroom-test-ai-cache" >> "$GITHUB_ENV"
       - name: Install the desktop application
         run: |
           bash install.sh
           cd "$RUNNER_TEMP"
-          "$HOME/.local/bin/fieldroom" --help
+          "$HOME/.local/bin/fieldroom-desktop" --help
           "$HOME/.local/share/fieldroom/venv/bin/python" -c 'from fieldroom.server import WEB; import rawpy; assert (WEB/"index.html").is_file()'
           test -s "$HOME/.local/share/applications/io.github.deltaboy1234.Fieldroom.desktop"
+      - name: Prepare verified public Smart Crop test photos
+        run: |
+          "$HOME/.local/share/fieldroom/venv/bin/python" tests/fetch_smartcrop_fixtures.py "$RUNNER_TEMP/fieldroom-model-fixtures"
       - name: Verify native zoom and export with a Nikon NEF
         run: |
           export FIELDROOM_TEST_NEF="$RUNNER_TEMP/iss030e122639.NEF"
+          export FIELDROOM_SMARTCROP_FIXTURES="$RUNNER_TEMP/fieldroom-model-fixtures"
           curl --fail --silent --show-error --location --retry 2 \
             "https://raw.githubusercontent.com/letmaik/rawpy/2705f5b223c162c3cbc48474fe1a01c3cf09fa4f/test/iss030e122639.NEF" \
             -o "$FIELDROOM_TEST_NEF"
@@ -46,7 +54,15 @@ jobs:
           else
             "$RUNNER_TEMP/fieldroom-test/node_modules/.bin/playwright" install chromium
           fi
+          node tests/smartcrop_ui.cjs
           node tests/browser.cjs
+          export FIELDROOM_COMPARISON_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Before-After.png"
+          node tests/comparison_browser.cjs
+          node tests/editing_workflow_browser.cjs
+          export FIELDROOM_SMARTCROP_IMAGE="$RUNNER_TEMP/fieldroom-model-fixtures/basketball1.png"
+          export FIELDROOM_SMARTCROP_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Smart-Crop.png"
+          export FIELDROOM_GROUPCROP_SCREENSHOT="$RUNNER_TEMP/Fieldroom-Group-Crop.png"
+          node tests/smartcrop_browser.cjs
       - name: Build and test the portable offline trial
         run: |
           export FIELDROOM_PYTHON="$HOME/.local/share/fieldroom/venv/bin/python"
@@ -65,3 +81,12 @@ jobs:
         with:
           name: Fieldroom-Browser-Trial
           path: ${{ runner.temp }}/Fieldroom-Browser-Trial.html
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Fieldroom-Smart-Crop-Check
+          path: |
+            ${{ runner.temp }}/Fieldroom-Smart-Crop.png
+            ${{ runner.temp }}/Fieldroom-Group-Crop.png
+            ${{ runner.temp }}/Fieldroom-Before-After.png
+          if-no-files-found: ignore

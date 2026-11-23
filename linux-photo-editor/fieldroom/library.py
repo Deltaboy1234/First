@@ -142,7 +142,8 @@ def export(photo, values):
                 # Copy JPEG originals losslessly when exporting a completely untouched photo.
                 shutil.copyfile(source, tmp)
             else:
-                original = im.decode(source)
+                original = (im.prepare_ai(source, photo.revision, settings["ai_denoise"], settings["ai_sharpen"])
+                            if settings["ai_denoise"] or settings["ai_sharpen"] else im.decode(source))
                 result = im.render(original, settings)
                 result.save(tmp, format="JPEG", quality=95, subsampling=0,
                             icc_profile=im.SRGB, exif=original.exif)

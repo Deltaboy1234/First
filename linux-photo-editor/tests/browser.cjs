@@ -13,6 +13,7 @@ const root = path.resolve(__dirname, "..");
 const python = process.env.FIELDROOM_PYTHON || "python3";
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "fieldroom-ui-"));
 const roll = path.join(temp, "Test roll");
+const scrollRoll = path.join(temp, "Scroll roll");
 let server, browser;
 async function run() {
   const fixture = spawnSync(python, ["-c",
@@ -23,10 +24,16 @@ async function run() {
     encoding: "utf8"
   });
   if (fixture.status !== 0) throw Error(fixture.stderr || "Could not prepare the disposable roll.");
+  fs.mkdirSync(scrollRoll);
+  for (let i = 1; i <= 24; i++) {
+    fs.copyFileSync(path.join(roll, "second folder", "Other.jpg"),
+      path.join(scrollRoll, `${String(i).padStart(2, "0")}-scroll.jpg`));
+  }
   server = spawn(python, ["-u", "app.py", "--no-browser", roll], {
     cwd: root,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {...process.env, FIELDROOM_STATE_DIR: path.join(temp, "state")}
   });
   server.stderr.on("data", d => process.stderr.write(d));
   const url = await new Promise((resolve, reject) => {
@@ -71,6 +78,19 @@ async function run() {
       vp = page.locator("#viewport");
     await page.waitForFunction(() => document.querySelector("#infoSize").textContent.includes("3,200") ||
       document.querySelector("#infoSize").textContent.includes("3200"));
+    // A new browser context still recovers accepted edits from this server's
+    // durable store. Start each density pass with the full original framing.
+    const resetPreview = dpr === 2 ? page.waitForResponse(response => {
+      if (!response.url().endsWith("/api/preview")) return false;
+      const recipe = response.request().postDataJSON().recipe;
+      return recipe.exposure === 0 && JSON.stringify(recipe.crop) === "[0,0,1,1]";
+    }) : null;
+    await page.locator("#resetAll").click();
+    if (resetPreview) {
+      const result = await (await resetPreview).json();
+      await page.waitForFunction(src => document.querySelector("#overviewPhoto").src === src,
+        "data:image/jpeg;base64," + result.image);
+    }
     const fitted = await plane.boundingBox();
     assert(fitted.width < 1000);
     const photo = await vp.boundingBox();
@@ -176,11 +196,13 @@ async function run() {
       await page.locator("#chooseFolder").click();
       await page.waitForFunction(() => document.querySelector("#photoName").textContent === "Other.jpg");
     }
+    await filmstripInteractions(page);
     assert.deepEqual(errors, []);
     await context.close();
-    console.log(`Passed ${dpr}× display zoom, pan, Navigator, crop and navigation`);
+    console.log(`Passed ${dpr}× display zoom, pan, Navigator, crop, navigation and horizontal filmstrip scrolling`);
     if (dpr === 1) {
-      // Use fresh originals for the next display scale.
+      // Remove exported settings. Accepted recovery settings are reset through
+      // the actual UI at the start of the next display pass.
       const output = path.resolve(roll, "Edited");
       assert.equal(path.dirname(output), path.resolve(roll));
       fs.rmSync(output, {
@@ -189,6 +211,64 @@ async function run() {
     }
   }
 }
+
+async function filmstripInteractions(page) {
+  await page.locator("#openFolder").click();
+  await page.locator("#folderPath").fill(scrollRoll);
+  await page.locator("#chooseFolder").click();
+  await page.waitForFunction(() => document.querySelector("#photoName").textContent === "01-scroll.jpg" &&
+    !document.querySelector("#cropTool").disabled);
+  assert.equal(await page.locator("#filmstrip .thumb").count(), 24);
+  const strip = page.locator("#filmstrip");
+  assert(await strip.evaluate(node => node.scrollWidth - node.clientWidth > 800),
+    "The filmstrip fixture must contain enough photos to scroll.");
+
+  await page.locator("#cropTool").click();
+  await page.waitForSelector("#cropRect", {state:"visible"});
+  const photo = await page.locator("#photoPlane").boundingBox();
+  await page.mouse.move(photo.x + photo.width * .15, photo.y + photo.height * .15);
+  await page.mouse.down();
+  await page.mouse.move(photo.x + photo.width * .8, photo.y + photo.height * .8, {steps:4});
+  await page.mouse.up();
+  const draft = await page.locator("#cropRect").getAttribute("style");
+  const draftSize = await page.locator("#cropSize").innerText();
+  const selected = await page.locator("#photoName").innerText();
+  const region = await strip.boundingBox();
+  await page.mouse.move(region.x + region.width / 2, region.y + region.height / 2);
+
+  await page.mouse.wheel(0, 360);
+  await page.waitForFunction(() => document.querySelector("#filmstrip").scrollLeft > 0);
+  const afterDown = await strip.evaluate(node => node.scrollLeft);
+  assert.equal(await page.locator("#photoName").innerText(), selected,
+    "Vertical wheel over the filmstrip must not change the active photo.");
+  await page.mouse.wheel(0, -120);
+  await page.waitForFunction(previous => document.querySelector("#filmstrip").scrollLeft < previous, afterDown);
+  const afterUp = await strip.evaluate(node => node.scrollLeft);
+  await page.mouse.wheel(240, 0);
+  await page.waitForFunction(previous => document.querySelector("#filmstrip").scrollLeft > previous, afterUp);
+  assert.equal(await page.locator("#photoName").innerText(), selected,
+    "Horizontal trackpad scrolling must not change the active photo.");
+  assert.equal(await page.locator("#cropPanel").isVisible(), true);
+  assert.equal(await page.locator("#cropRect").getAttribute("style"), draft,
+    "Scrolling the filmstrip must preserve the open manual crop.");
+  assert.equal(await page.locator("#cropSize").innerText(), draftSize);
+
+  // At the end of the strip, additional wheel input must remain a scroll,
+  // without wrapping to another photo or reaching the image zoom handler.
+  await strip.evaluate(node => {node.scrollLeft = node.scrollWidth;});
+  await page.mouse.wheel(0, 240);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.locator("#photoName").innerText(), selected);
+  assert.equal(await page.locator("#cropRect").getAttribute("style"), draft);
+  assert(await strip.evaluate(node => Math.abs(node.scrollLeft - (node.scrollWidth - node.clientWidth)) <= 1));
+
+  await page.locator("#cancelCrop").click();
+  await page.locator("#filmstrip .thumb").last().click();
+  await page.waitForFunction(() => document.querySelector("#photoName").textContent === "24-scroll.jpg");
+  assert.equal(await page.locator('#filmstrip .thumb[aria-selected="true"]').count(), 1,
+    "Clicking a filmstrip thumbnail must still select that photo.");
+}
+
 run().catch(e => {
   console.error(e);
   process.exitCode = 1;
