@@ -13,9 +13,6 @@ jobs:
   install-and-edit:
     runs-on: ubuntu-24.04
     timeout-minutes: 18
-    env:
-      FIELDROOM_STATE_DIR: ${{ runner.temp }}/fieldroom-test-state
-      FIELDROOM_AI_CACHE_DIR: ${{ runner.temp }}/fieldroom-test-ai-cache
     defaults:
       run:
         working-directory: linux-photo-editor
@@ -24,6 +21,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Isolate editing recovery and AI cache
+        run: |
+          printf 'FIELDROOM_STATE_DIR=%s\n' "$RUNNER_TEMP/fieldroom-test-state" >> "$GITHUB_ENV"
+          printf 'FIELDROOM_AI_CACHE_DIR=%s\n' "$RUNNER_TEMP/fieldroom-test-ai-cache" >> "$GITHUB_ENV"
       - name: Install the desktop application
         run: |
           bash install.sh
